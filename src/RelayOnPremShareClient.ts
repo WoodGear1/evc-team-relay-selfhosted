@@ -260,6 +260,135 @@ export class BillingApiError extends Error {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Published Links types
+// ---------------------------------------------------------------------------
+
+export type LinkAccessMode = "public" | "members" | "protected";
+export type LinkState = "active" | "revoked" | "expired";
+
+export interface PublishedLink {
+	id: string;
+	share_id: string;
+	target_type: "file" | "folder";
+	target_id: string;
+	target_path: string;
+	access_mode: LinkAccessMode;
+	state: LinkState;
+	slug: string;
+	title: string | null;
+	description: string | null;
+	page_title: string | null;
+	theme_preset: string;
+	noindex: boolean;
+	allow_comments: boolean;
+	created_by: string | null;
+	revoked_by: string | null;
+	revoked_at: string | null;
+	expires_at: string | null;
+	last_accessed_at: string | null;
+	created_at: string;
+	updated_at: string;
+	web_url: string | null;
+	page_metadata: Record<string, unknown> | null;
+}
+
+export interface CreatePublishedLinkRequest {
+	share_id: string;
+	target_type: "file" | "folder";
+	target_id: string;
+	target_path: string;
+	access_mode: LinkAccessMode;
+	slug?: string;
+	password?: string;
+	title?: string;
+	description?: string;
+	page_title?: string;
+	theme_preset?: string;
+	noindex?: boolean;
+	allow_comments?: boolean;
+	expires_at?: string;
+	page_metadata?: Record<string, unknown>;
+}
+
+export interface UpdatePublishedLinkRequest {
+	access_mode?: LinkAccessMode;
+	slug?: string;
+	password?: string;
+	title?: string;
+	description?: string;
+	page_title?: string;
+	theme_preset?: string;
+	noindex?: boolean;
+	allow_comments?: boolean;
+	expires_at?: string;
+	page_metadata?: Record<string, unknown>;
+	target_path?: string;
+}
+
+export interface PublishedLinkEvent {
+	id: string;
+	published_link_id: string;
+	event_type: string;
+	actor_user_id: string | null;
+	actor_kind: string;
+	target_type: string | null;
+	target_id: string | null;
+	ip_hash: string | null;
+	user_agent_summary: string | null;
+	payload_json: Record<string, unknown> | null;
+	created_at: string;
+}
+
+export interface UserCapabilities {
+	can_manage_links: boolean;
+	can_revoke_links: boolean;
+	can_create_users: boolean;
+	can_manage_members: boolean;
+	can_view_audit: boolean;
+	can_comment: boolean;
+	can_customize_web: boolean;
+}
+
+export interface CommentThread {
+	id: string;
+	share_id: string;
+	published_link_id: string | null;
+	target_id: string;
+	anchor_type: "document" | "block";
+	anchor_id: string | null;
+	status: "open" | "resolved";
+	created_by: string | null;
+	created_by_email: string | null;
+	resolved_by: string | null;
+	resolved_at: string | null;
+	created_at: string;
+	updated_at: string;
+	items: CommentItem[];
+}
+
+export interface CommentItem {
+	id: string;
+	thread_id: string;
+	body_markdown: string;
+	created_by: string | null;
+	created_by_email: string | null;
+	created_at: string;
+	edited_at: string | null;
+}
+
+export interface AuditLogEntry {
+	id: string;
+	timestamp: string;
+	action: string;
+	actor_user_id: string | null;
+	target_user_id: string | null;
+	target_share_id: string | null;
+	details: Record<string, unknown> | null;
+	ip_address: string | null;
+	user_agent: string | null;
+}
+
 /**
  * Share list response from API (returns array directly)
  */
@@ -982,5 +1111,208 @@ export class RelayOnPremShareClient {
 			// Not a JSON response or not a visibility error
 		}
 		return null;
+	}
+
+	// -----------------------------------------------------------------------
+	// Published Links API
+	// -----------------------------------------------------------------------
+
+	async createPublishedLink(payload: CreatePublishedLinkRequest): Promise<PublishedLink> {
+		const url = `${this.normalizedUrl}/v1/published-links`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+			body: JSON.stringify(payload),
+		});
+		if (!resp.ok) throw new Error(`Failed to create link: ${resp.status}`);
+		return resp.json();
+	}
+
+	async listPublishedLinks(params: {
+		shareId?: string;
+		targetType?: string;
+		targetId?: string;
+		includeRevoked?: boolean;
+	} = {}): Promise<PublishedLink[]> {
+		const qs = new URLSearchParams();
+		if (params.shareId) qs.set("share_id", params.shareId);
+		if (params.targetType) qs.set("target_type", params.targetType);
+		if (params.targetId) qs.set("target_id", params.targetId);
+		if (params.includeRevoked) qs.set("include_revoked", "true");
+		const url = `${this.normalizedUrl}/v1/published-links?${qs.toString()}`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) throw new Error(`Failed to list links: ${resp.status}`);
+		return resp.json();
+	}
+
+	async getPublishedLink(linkId: string): Promise<PublishedLink> {
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) throw new Error(`Failed to get link: ${resp.status}`);
+		return resp.json();
+	}
+
+	async updatePublishedLink(linkId: string, payload: UpdatePublishedLinkRequest): Promise<PublishedLink> {
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}`;
+		const resp = await customFetch(url, {
+			method: "PATCH",
+			headers: await this.getHeaders(),
+			body: JSON.stringify(payload),
+		});
+		if (!resp.ok) throw new Error(`Failed to update link: ${resp.status}`);
+		return resp.json();
+	}
+
+	async revokePublishedLink(linkId: string): Promise<PublishedLink> {
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}/revoke`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+		});
+		if (!resp.ok) throw new Error(`Failed to revoke link: ${resp.status}`);
+		return resp.json();
+	}
+
+	async rotatePublishedLink(linkId: string): Promise<PublishedLink> {
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}/rotate`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+		});
+		if (!resp.ok) throw new Error(`Failed to rotate link: ${resp.status}`);
+		return resp.json();
+	}
+
+	async restorePublishedLink(linkId: string): Promise<PublishedLink> {
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}/restore`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+		});
+		if (!resp.ok) throw new Error(`Failed to restore link: ${resp.status}`);
+		return resp.json();
+	}
+
+	async getPublishedLinkEvents(linkId: string): Promise<PublishedLinkEvent[]> {
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}/events`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) throw new Error(`Failed to get events: ${resp.status}`);
+		return resp.json();
+	}
+
+	// -----------------------------------------------------------------------
+	// Capabilities API
+	// -----------------------------------------------------------------------
+
+	async getMyCapabilities(shareId?: string): Promise<UserCapabilities> {
+		const qs = shareId ? `?share_id=${shareId}` : "";
+		const url = `${this.normalizedUrl}/v1/published-links/capabilities/me${qs}`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) throw new Error(`Failed to get capabilities: ${resp.status}`);
+		return resp.json();
+	}
+
+	// -----------------------------------------------------------------------
+	// Comments API
+	// -----------------------------------------------------------------------
+
+	async listLinkComments(linkId: string, includeResolved = false): Promise<CommentThread[]> {
+		const qs = includeResolved ? "?include_resolved=true" : "";
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}/comments${qs}`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) throw new Error(`Failed to list comments: ${resp.status}`);
+		return resp.json();
+	}
+
+	async createCommentThread(linkId: string, payload: {
+		target_id: string;
+		anchor_type?: "document" | "block";
+		anchor_id?: string;
+		body: string;
+	}): Promise<CommentThread> {
+		const url = `${this.normalizedUrl}/v1/published-links/${linkId}/comments/threads`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+			body: JSON.stringify(payload),
+		});
+		if (!resp.ok) throw new Error(`Failed to create thread: ${resp.status}`);
+		return resp.json();
+	}
+
+	async replyToThread(threadId: string, body: string): Promise<CommentItem> {
+		const url = `${this.normalizedUrl}/v1/comment-threads/${threadId}/reply`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+			body: JSON.stringify({ body }),
+		});
+		if (!resp.ok) throw new Error(`Failed to reply: ${resp.status}`);
+		return resp.json();
+	}
+
+	async resolveThread(threadId: string): Promise<CommentThread> {
+		const url = `${this.normalizedUrl}/v1/comment-threads/${threadId}/resolve`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+		});
+		if (!resp.ok) throw new Error(`Failed to resolve thread: ${resp.status}`);
+		return resp.json();
+	}
+
+	async reopenThread(threadId: string): Promise<CommentThread> {
+		const url = `${this.normalizedUrl}/v1/comment-threads/${threadId}/reopen`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+		});
+		if (!resp.ok) throw new Error(`Failed to reopen thread: ${resp.status}`);
+		return resp.json();
+	}
+
+	// -----------------------------------------------------------------------
+	// Audit API
+	// -----------------------------------------------------------------------
+
+	async listAuditLogs(params: {
+		shareId?: string;
+		userId?: string;
+		action?: string;
+		skip?: number;
+		limit?: number;
+	} = {}): Promise<AuditLogEntry[]> {
+		const qs = new URLSearchParams();
+		if (params.shareId) qs.set("target_share_id", params.shareId);
+		if (params.userId) qs.set("actor_user_id", params.userId);
+		if (params.action) qs.set("action", params.action);
+		if (params.skip) qs.set("skip", String(params.skip));
+		if (params.limit) qs.set("limit", String(params.limit));
+		const url = `${this.normalizedUrl}/v1/admin/audit-logs?${qs.toString()}`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) throw new Error(`Failed to list audit logs: ${resp.status}`);
+		return resp.json();
+	}
+
+	// -----------------------------------------------------------------------
+	// User Admin API (admin-only)
+	// -----------------------------------------------------------------------
+
+	async adminListUsers(): Promise<User[]> {
+		const url = `${this.normalizedUrl}/v1/admin/users`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) throw new Error(`Failed to list users: ${resp.status}`);
+		return resp.json();
+	}
+
+	async adminCreateUser(email: string, password: string, isAdmin = false): Promise<User> {
+		const url = `${this.normalizedUrl}/v1/admin/users`;
+		const resp = await customFetch(url, {
+			method: "POST",
+			headers: await this.getHeaders(),
+			body: JSON.stringify({ email, password, is_admin: isAdmin }),
+		});
+		if (!resp.ok) throw new Error(`Failed to create user: ${resp.status}`);
+		return resp.json();
 	}
 }
