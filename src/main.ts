@@ -106,9 +106,13 @@ import {
 import { RelayOnPremTokenProvider } from "./auth/RelayOnPremTokenProvider";
 import type { IAuthProvider } from "./auth/IAuthProvider";
 import { RelayOnPremShareClient, type FolderItem } from "./RelayOnPremShareClient";
-import { RelayOnPremShareClientManager } from "./RelayOnPremShareClientManager";
+import { RelayOnPremShareClientManager, type ShareWithServer } from "./RelayOnPremShareClientManager";
 import { QuickShareModal } from "./ui/QuickShareModal";
 import { confirmDialog } from "./ui/dialogs";
+import { LinkManagementModal } from "./ui/LinkManagementModal";
+import { AdminUserModal } from "./ui/AdminUserModal";
+import { AuditModal } from "./ui/AuditModal";
+import { CommentsPanel } from "./ui/CommentsPanel";
 
 interface DebugSettings {
 	debugging: boolean;
@@ -277,6 +281,79 @@ export default class Live extends Plugin {
 		this.loginManager.getEndpointManager().clearValidatedEndpoints();
 		void this.endpointSettings.update(() => ({}));
 		new Notice("Reset to default endpoints", 3000);
+	}
+
+	private getDefaultRelayClient(): RelayOnPremShareClient | undefined {
+		if (this.shareClientManager) {
+			const settings = this.relayOnPremSettings.get();
+			const defaultServerId =
+				settings.defaultServerId || settings.servers[0]?.id;
+			if (defaultServerId) {
+				return this.shareClientManager.getClient(defaultServerId);
+			}
+		}
+		return this.shareClient;
+	}
+
+	private async resolveActiveShareContext(): Promise<{
+		client: RelayOnPremShareClient;
+		shareId: string;
+		serverId?: string;
+		targetType: "file" | "folder";
+		targetId: string;
+		targetPath: string;
+	}> {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) {
+			throw new Error("Open a file inside a shared document or folder first");
+		}
+
+		if (this.shareClientManager) {
+			const shares = await this.shareClientManager.getAllSharesFlat();
+			const docShare = shares.find((share) => share.kind === "doc" && share.path === activeFile.path);
+			const folderShare = shares
+				.filter((share) => share.kind === "folder" && activeFile.path.startsWith(`${share.path}/`))
+				.sort((a, b) => b.path.length - a.path.length)[0];
+			const selectedShare = (docShare || folderShare) as ShareWithServer | undefined;
+			if (!selectedShare) {
+				throw new Error("Current file is not inside a relay-onprem share");
+			}
+			const client = this.shareClientManager.getClient(selectedShare.serverId);
+			if (!client) {
+				throw new Error("No share client is available for the current server");
+			}
+			const targetType: "file" | "folder" = selectedShare.kind === "doc" ? "file" : "folder";
+			return {
+				client,
+				shareId: selectedShare.id,
+				serverId: selectedShare.serverId,
+				targetType,
+				targetId: selectedShare.id,
+				targetPath: selectedShare.path,
+			};
+		}
+
+		if (!this.shareClient) {
+			throw new Error("Relay on-prem client is not available");
+		}
+
+		const shares = await this.shareClient.listShares();
+		const docShare = shares.find((share) => share.kind === "doc" && share.path === activeFile.path);
+		const folderShare = shares
+			.filter((share) => share.kind === "folder" && activeFile.path.startsWith(`${share.path}/`))
+			.sort((a, b) => b.path.length - a.path.length)[0];
+		const selectedShare = docShare || folderShare;
+		if (!selectedShare) {
+			throw new Error("Current file is not inside a relay-onprem share");
+		}
+		const targetType: "file" | "folder" = selectedShare.kind === "doc" ? "file" : "folder";
+		return {
+			client: this.shareClient,
+			shareId: selectedShare.id,
+			targetType,
+			targetId: selectedShare.id,
+			targetPath: selectedShare.path,
+		};
 	}
 
 	/**
@@ -533,6 +610,94 @@ export default class Live extends Plugin {
 			name: "Open settings",
 			callback: () => {
 				void this.openSettings();
+			},
+		});
+
+		this.addCommand({
+			id: "manage-published-links",
+			name: "Manage published links",
+			callback: async () => {
+				try {
+					const context = await this.resolveActiveShareContext();
+					const modal = new LinkManagementModal(
+						this.app,
+						context.client,
+						context.shareId,
+						context.targetType,
+						context.targetId,
+						context.targetPath,
+					);
+					this.openModals.push(modal);
+					modal.open();
+				} catch (error: unknown) {
+					new Notice(error instanceof Error ? error.message : "Unable to open published links");
+				}
+			},
+		});
+
+		this.addCommand({
+			id: "admin-manage-users",
+			name: "Admin: manage users",
+			callback: () => {
+				const client = this.getDefaultRelayClient();
+				if (!client) {
+					new Notice("No relay-onprem client is available");
+					return;
+				}
+				const modal = new AdminUserModal(this.app, client);
+				this.openModals.push(modal);
+				modal.open();
+			},
+		});
+
+		this.addCommand({
+			id: "view-audit-log",
+			name: "View audit log",
+			callback: async () => {
+				try {
+					const context = await this.resolveActiveShareContext();
+					const modal = new AuditModal(this.app, context.client, context.shareId);
+					this.openModals.push(modal);
+					modal.open();
+				} catch {
+					const client = this.getDefaultRelayClient();
+					if (!client) {
+						new Notice("No relay-onprem client is available");
+						return;
+					}
+					const modal = new AuditModal(this.app, client);
+					this.openModals.push(modal);
+					modal.open();
+				}
+			},
+		});
+
+		this.addCommand({
+			id: "comments",
+			name: "Comments",
+			callback: async () => {
+				try {
+					const context = await this.resolveActiveShareContext();
+					const links = await context.client.listPublishedLinks({
+						shareId: context.shareId,
+						targetId: context.targetId,
+						targetType: context.targetType,
+					});
+					const activeLink = links.find((link) => link.state === "active" && link.allow_comments);
+					if (!activeLink) {
+						throw new Error("No active published link with comments enabled was found for the current target");
+					}
+					const modal = new CommentsPanel(
+						this.app,
+						context.client,
+						activeLink.id,
+						activeLink.target_id,
+					);
+					this.openModals.push(modal);
+					modal.open();
+				} catch (error: unknown) {
+					new Notice(error instanceof Error ? error.message : "Unable to open comments");
+				}
 			},
 		});
 

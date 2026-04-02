@@ -5,7 +5,7 @@
  * Supports multiple servers with independent authentication
  */
 
-/** Well-known EVC Team Relay server */
+/** Built-in relay server entry */
 export const EVC_SERVER_ID = "evc-team-relay";
 export const EVC_CP_URL = "https://cp.tr.entire.vc";
 
@@ -99,12 +99,12 @@ interface LegacyRelayOnPremSettings {
 }
 
 export const DEFAULT_RELAY_ONPREM_SETTINGS: RelayOnPremSettings = {
-	// EVC Team Relay always uses relay-onprem mode (no System 3 cloud)
+	// Relay-onprem mode is always enabled for this fork.
 	enabled: true,
 	servers: [
 		{
 			id: EVC_SERVER_ID,
-			name: "EVC Team Relay",
+			name: "Obsidian Relay",
 			controlPlaneUrl: EVC_CP_URL,
 			isValidated: false,
 		},
@@ -117,7 +117,7 @@ export const DEFAULT_RELAY_ONPREM_SETTINGS: RelayOnPremSettings = {
  */
 export interface MigrationResult {
 	settings: RelayOnPremSettings;
-	/** If an existing server was adopted as EVC, this is the old server ID */
+	/** If an existing built-in server was adopted, this is the old server ID */
 	renamedServerId?: string;
 	/** Whether any changes were made */
 	changed: boolean;
@@ -145,13 +145,13 @@ export function migrateRelayOnPremSettings(
 		let defaultServerId = orig.defaultServerId;
 
 		const evcByIdIdx = servers.findIndex((s) => s.id === EVC_SERVER_ID);
-		// Find the BEST EVC-URL server: prefer one with isValidated or lastValidated (has auth)
+		// Find the best built-in URL server: prefer one with isValidated or lastValidated (has auth)
 		const evcByUrlIdxAll = servers
 			.map((s, i) => ({ s, i }))
 			.filter(({ s }) => s.controlPlaneUrl === EVC_CP_URL && s.id !== EVC_SERVER_ID);
 
 		if (evcByIdIdx >= 0 && evcByUrlIdxAll.length > 0) {
-			// Dedup: EVC by id exists AND there are duplicate(s) with same URL but different id.
+			// Dedup: built-in server by id exists AND there are duplicate(s) with same URL but different id.
 			// Keep the richer duplicate (the one with auth/validation) under the EVC_SERVER_ID,
 			// remove the empty stub.
 			const richest = evcByUrlIdxAll.reduce((best, cur) =>
@@ -163,7 +163,7 @@ export function migrateRelayOnPremSettings(
 			servers[evcByIdIdx] = {
 				...richServer,
 				id: EVC_SERVER_ID,
-				name: richServer.name || evcStub.name || "EVC Team Relay",
+				name: richServer.name || evcStub.name || "Obsidian Relay",
 			};
 			renamedServerId = richServer.id;
 
@@ -177,14 +177,14 @@ export function migrateRelayOnPremSettings(
 			servers = servers.filter((s) => !removeIds.has(s.id));
 			changed = true;
 		} else if (evcByIdIdx < 0) {
-			// No EVC server by id — check if there's one by URL to adopt
+			// No built-in server by id — check if there's one by URL to adopt
 			if (evcByUrlIdxAll.length > 0) {
 				const richest = evcByUrlIdxAll.reduce((best, cur) =>
 					(cur.s.isValidated || cur.s.lastValidated) ? cur : best, evcByUrlIdxAll[0]);
 				renamedServerId = richest.s.id;
 				servers[richest.i] = { ...richest.s, id: EVC_SERVER_ID };
 				if (!servers[richest.i].name || servers[richest.i].name === new URL(EVC_CP_URL).hostname) {
-					servers[richest.i].name = "EVC Team Relay";
+					servers[richest.i].name = "Obsidian Relay";
 				}
 				if (defaultServerId === renamedServerId) {
 					defaultServerId = EVC_SERVER_ID;
@@ -198,10 +198,10 @@ export function migrateRelayOnPremSettings(
 				}
 				changed = true;
 			} else {
-				// No EVC server at all — prepend it
+				// No built-in server at all — prepend it
 				servers.unshift({
 					id: EVC_SERVER_ID,
-					name: "EVC Team Relay",
+					name: "Obsidian Relay",
 					controlPlaneUrl: EVC_CP_URL,
 					isValidated: false,
 				});

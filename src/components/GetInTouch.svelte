@@ -44,7 +44,7 @@
 			<div class="menu-content">
 				<span style="text-align: center; display: flex">
 					<a
-						href="https://github.com/entire-vc"
+						href="https://github.com/WoodGear1/evc-team-relay-selfhosted"
 						target="_blank"
 						rel="noopener noreferrer"
 						class="menu-item"

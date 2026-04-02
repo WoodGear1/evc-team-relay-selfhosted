@@ -4,7 +4,7 @@
 </script>
 
 <div class="evc-team-relay-text" style="font-size: {fontSize}px;">
-	<span class="evc-text">EVC Team Relay</span>
+	<span class="evc-text">Obsidian Relay</span>
 </div>
 
 <style>

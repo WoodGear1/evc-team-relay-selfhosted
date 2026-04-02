@@ -1,7 +1,7 @@
 {
 	"name": "evc-team-relay",
-	"version": "1.1.7-wgwg.6",
-	"description": "Enterprise collaboration with self-hosted relay infrastructure for Obsidian.",
+	"version": "1.1.7-wgwg.7",
+	"description": "Self-hosted collaboration and web publishing for Obsidian.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs watch",
@@ -20,7 +20,7 @@
 		"real-time",
 		"enterprise"
 	],
-	"author": "EVC Team",
+	"author": "WoodGear",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
