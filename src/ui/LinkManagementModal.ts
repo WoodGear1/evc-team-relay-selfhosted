@@ -16,6 +16,28 @@ import type {
 } from "../RelayOnPremShareClient";
 import type { RelayOnPremShareClient } from "../RelayOnPremShareClient";
 
+const THEME_PRESET_OPTIONS: Array<{ value: string; label: string }> = [
+	{ value: "default", label: "Default" },
+	{ value: "minimal", label: "Minimal" },
+	{ value: "dark", label: "Dark" },
+	{ value: "wide", label: "Wide" },
+];
+
+function toDatetimeLocalValue(value: string | null | undefined): string {
+	if (!value) return "";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "";
+	const pad = (num: number) => String(num).padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function fromDatetimeLocalValue(value: string): string | undefined {
+	if (!value) return undefined;
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return undefined;
+	return date.toISOString();
+}
+
 export class LinkManagementModal extends Modal {
 	private links: PublishedLink[] = [];
 	private capabilities: UserCapabilities | null = null;
@@ -55,6 +77,7 @@ export class LinkManagementModal extends Modal {
 			const [links, capabilities] = await Promise.all([
 				this.client.listPublishedLinks({
 					shareId: this.shareId,
+					targetType: this.targetType,
 					targetId: this.targetId,
 					includeRevoked: true,
 				}),
@@ -135,15 +158,21 @@ export class LinkManagementModal extends Modal {
 	}
 
 	private renderLinkRow(container: HTMLElement, link: PublishedLink) {
+		const details = [
+			`${link.access_mode} · ${link.state}`,
+			link.title ? `Title: ${link.title}` : "",
+			link.page_title ? `Page title: ${link.page_title}` : "",
+			link.theme_preset ? `Theme: ${link.theme_preset}` : "",
+			link.allow_comments ? "Comments enabled" : "",
+			link.noindex ? "Noindex" : "Indexed",
+			link.last_accessed_at
+				? `Last accessed: ${new Date(link.last_accessed_at).toLocaleDateString()}`
+				: "",
+		].filter(Boolean);
+
 		const row = new Setting(container)
 			.setName(`/${link.slug}`)
-			.setDesc(
-				`${link.access_mode} · ${link.state}` +
-				(link.title ? ` · ${link.title}` : "") +
-				(link.last_accessed_at
-					? ` · Last accessed: ${new Date(link.last_accessed_at).toLocaleDateString()}`
-					: ""),
-			);
+			.setDesc(details.join(" · "));
 
 		if (link.state === "active") {
 			// Copy URL
@@ -277,8 +306,12 @@ class CreateLinkModal extends Modal {
 	private slug = "";
 	private password = "";
 	private title = "";
+	private description = "";
+	private pageTitle = "";
+	private themePreset = "default";
 	private noindex = true;
 	private allowComments = false;
+	private expiresAt = "";
 
 	constructor(
 		app: any,
@@ -324,6 +357,20 @@ class CreateLinkModal extends Modal {
 				text.setPlaceholder("My Page Title").onChange((val) => (this.title = val));
 			});
 
+		new Setting(contentEl)
+			.setName("Description")
+			.setDesc("Optional summary for link cards and previews")
+			.addText((text) => {
+				text.setPlaceholder("Short description").onChange((val) => (this.description = val));
+			});
+
+		new Setting(contentEl)
+			.setName("Browser page title")
+			.setDesc("Optional <title> shown in the published page tab")
+			.addText((text) => {
+				text.setPlaceholder("Page title").onChange((val) => (this.pageTitle = val));
+			});
+
 		const passwordContainer = contentEl.createDiv({ cls: "password-container" });
 		if (this.accessMode === "protected") {
 			new Setting(passwordContainer)
@@ -336,6 +383,16 @@ class CreateLinkModal extends Modal {
 		}
 
 		new Setting(contentEl)
+			.setName("Theme preset")
+			.setDesc("Visual style for the published page")
+			.addDropdown((dropdown) => {
+				for (const option of THEME_PRESET_OPTIONS) {
+					dropdown.addOption(option.value, option.label);
+				}
+				dropdown.setValue(this.themePreset).onChange((val) => (this.themePreset = val));
+			});
+
+		new Setting(contentEl)
 			.setName("Allow search engine indexing")
 			.addToggle((toggle) => {
 				toggle.setValue(!this.noindex).onChange((val) => (this.noindex = !val));
@@ -345,6 +402,14 @@ class CreateLinkModal extends Modal {
 			.setName("Allow comments")
 			.addToggle((toggle) => {
 				toggle.setValue(this.allowComments).onChange((val) => (this.allowComments = val));
+			});
+
+		new Setting(contentEl)
+			.setName("Expiration")
+			.setDesc("Optional time after which the link expires")
+			.addText((text) => {
+				text.inputEl.type = "datetime-local";
+				text.onChange((val) => (this.expiresAt = val));
 			});
 
 		new Setting(contentEl).addButton((btn) => {
@@ -375,6 +440,11 @@ class CreateLinkModal extends Modal {
 		if (this.slug) payload.slug = this.slug;
 		if (this.password) payload.password = this.password;
 		if (this.title) payload.title = this.title;
+		if (this.description) payload.description = this.description;
+		if (this.pageTitle) payload.page_title = this.pageTitle;
+		if (this.themePreset) payload.theme_preset = this.themePreset;
+		const expiresAt = fromDatetimeLocalValue(this.expiresAt);
+		if (expiresAt) payload.expires_at = expiresAt;
 
 		try {
 			const link = await this.client.createPublishedLink(payload);
@@ -413,9 +483,13 @@ class EditLinkModal extends Modal {
 		let accessMode = this.link.access_mode;
 		let slug = this.link.slug;
 		let title = this.link.title || "";
+		let description = this.link.description || "";
+		let pageTitle = this.link.page_title || "";
+		let themePreset = this.link.theme_preset || "default";
 		let noindex = this.link.noindex;
 		let allowComments = this.link.allow_comments;
 		let password = "";
+		let expiresAt = toDatetimeLocalValue(this.link.expires_at);
 
 		new Setting(contentEl)
 			.setName("Access mode")
@@ -441,11 +515,32 @@ class EditLinkModal extends Modal {
 			});
 
 		new Setting(contentEl)
+			.setName("Description")
+			.addText((text) => {
+				text.setValue(description).onChange((val) => (description = val));
+			});
+
+		new Setting(contentEl)
+			.setName("Browser page title")
+			.addText((text) => {
+				text.setValue(pageTitle).onChange((val) => (pageTitle = val));
+			});
+
+		new Setting(contentEl)
 			.setName("New password")
 			.setDesc("Leave empty to keep current password")
 			.addText((text) => {
 				text.inputEl.type = "password";
 				text.onChange((val) => (password = val));
+			});
+
+		new Setting(contentEl)
+			.setName("Theme preset")
+			.addDropdown((dropdown) => {
+				for (const option of THEME_PRESET_OPTIONS) {
+					dropdown.addOption(option.value, option.label);
+				}
+				dropdown.setValue(themePreset).onChange((val) => (themePreset = val));
 			});
 
 		new Setting(contentEl)
@@ -460,15 +555,40 @@ class EditLinkModal extends Modal {
 				toggle.setValue(allowComments).onChange((val) => (allowComments = val));
 			});
 
+		new Setting(contentEl)
+			.setName("Expiration")
+			.setDesc("Leave empty to keep the link active indefinitely")
+			.addText((text) => {
+				text.inputEl.type = "datetime-local";
+				text.setValue(expiresAt).onChange((val) => (expiresAt = val));
+			});
+
 		new Setting(contentEl).addButton((btn) => {
 			btn.setButtonText("Save").setCta().onClick(async () => {
+				if (
+					accessMode === "protected" &&
+					this.link.access_mode !== "protected" &&
+					password.length < 8
+				) {
+					new Notice("Set a password of at least 8 characters for a protected link");
+					return;
+				}
+
 				const payload: UpdatePublishedLinkRequest = {};
 				if (accessMode !== this.link.access_mode) payload.access_mode = accessMode;
 				if (slug !== this.link.slug) payload.slug = slug;
 				if (title !== (this.link.title || "")) payload.title = title;
+				if (description !== (this.link.description || "")) payload.description = description;
+				if (pageTitle !== (this.link.page_title || "")) payload.page_title = pageTitle;
+				if (themePreset !== (this.link.theme_preset || "default")) payload.theme_preset = themePreset;
 				if (noindex !== this.link.noindex) payload.noindex = noindex;
 				if (allowComments !== this.link.allow_comments) payload.allow_comments = allowComments;
 				if (password) payload.password = password;
+				const normalizedExpiresAt = fromDatetimeLocalValue(expiresAt);
+				const originalExpiresAt = this.link.expires_at || undefined;
+				if (normalizedExpiresAt !== originalExpiresAt) {
+					payload.expires_at = normalizedExpiresAt ?? null;
+				}
 
 				try {
 					await this.client.updatePublishedLink(this.link.id, payload);

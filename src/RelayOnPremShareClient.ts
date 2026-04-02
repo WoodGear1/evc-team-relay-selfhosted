@@ -307,7 +307,7 @@ export interface CreatePublishedLinkRequest {
 	theme_preset?: string;
 	noindex?: boolean;
 	allow_comments?: boolean;
-	expires_at?: string;
+	expires_at?: string | null;
 	page_metadata?: Record<string, unknown>;
 }
 
@@ -321,7 +321,7 @@ export interface UpdatePublishedLinkRequest {
 	theme_preset?: string;
 	noindex?: boolean;
 	allow_comments?: boolean;
-	expires_at?: string;
+	expires_at?: string | null;
 	page_metadata?: Record<string, unknown>;
 	target_path?: string;
 }

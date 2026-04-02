@@ -4,10 +4,11 @@
 	import { createEventDispatcher } from "svelte";
 	import type Live from "../main";
 	import type { RelayOnPremServer } from "../RelayOnPremConfig";
-	import type { ShareMember, Invite, FolderItem } from "../RelayOnPremShareClient";
+	import type { ShareMember, Invite, FolderItem, RelayOnPremShareClient } from "../RelayOnPremShareClient";
 	import { LimitExceededApiError, VisibilityNotAllowedApiError } from "../RelayOnPremShareClient";
 	import type { ShareWithServer } from "../RelayOnPremShareClientManager";
 	import { FolderSuggestModal } from "../ui/FolderSuggestModal";
+	import { LinkManagementModal } from "../ui/LinkManagementModal";
 	import { S3RN } from "../S3RN";
 	import { confirmDialog, promptDialog, choiceDialog } from "../ui/dialogs";
 
@@ -115,6 +116,31 @@
 	function copyId() {
 		navigator.clipboard.writeText(currentShare.id);
 		new Notice("Share ID copied");
+	}
+
+	function getShareClient(): RelayOnPremShareClient | null {
+		if (plugin.shareClientManager) {
+			return plugin.shareClientManager.getClient(share.serverId) || null;
+		}
+		return plugin.shareClient || null;
+	}
+
+	function openPublishedLinks() {
+		const client = getShareClient();
+		if (!client) {
+			new Notice("No relay-onprem client is available");
+			return;
+		}
+
+		const modal = new LinkManagementModal(
+			plugin.app,
+			client,
+			currentShare.id,
+			currentShare.kind === "doc" ? "file" : "folder",
+			currentShare.id,
+			currentShare.path,
+		);
+		modal.open();
 	}
 
 	// Members
@@ -291,7 +317,20 @@
 			if (!newVisibility) return; // User cancelled — don't publish
 
 			try {
-				const payload = { visibility: newVisibility as "public" | "protected" };
+				const payload: { visibility: "public" | "protected"; password?: string } = {
+					visibility: newVisibility as "public" | "protected",
+				};
+				if (newVisibility === "protected") {
+					const password = await promptDialog(
+						plugin.app,
+						"Enter password for the protected web publication:",
+					);
+					if (!password || password.trim().length < 8) {
+						new Notice("Password must be at least 8 characters");
+						return;
+					}
+					payload.password = password.trim();
+				}
 				if (plugin.shareClientManager) {
 					await plugin.shareClientManager.updateShare(share.serverId, share.id, payload);
 				} else if (plugin.shareClient) {
@@ -699,6 +738,9 @@
 				<div class="evc-setting-row">
 					<div class="evc-setting-info">
 						<span>Publish to Web</span>
+						<span class="evc-setting-desc">
+							Sync this share for the web, then manage public, members-only, or password-protected links.
+						</span>
 					</div>
 					<label class="checkbox-container">
 						<input type="checkbox" checked={isPublished} on:change={(e) => toggleWebPublishing(e.currentTarget.checked)} />
@@ -706,6 +748,16 @@
 				</div>
 
 				{#if isPublished}
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Published link settings</span>
+							<span class="evc-setting-desc">
+								Configure access mode, password, comments, theme preset, title, and expiration for published pages.
+							</span>
+						</div>
+						<button class="mod-cta evc-small-btn" on:click={openPublishedLinks}>Manage Links</button>
+					</div>
+
 					{#if currentShare.web_url}
 						<div class="evc-setting-row">
 							<div class="evc-setting-info">
@@ -756,6 +808,16 @@
 							</div>
 						</div>
 					{/if}
+				{:else}
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Published link settings</span>
+							<span class="evc-setting-desc">
+								Enable web publishing first, then open link settings to add password protection and other rules.
+							</span>
+						</div>
+						<button class="evc-small-btn" disabled>Available after publish</button>
+					</div>
 				{/if}
 			</div>
 		{/if}
