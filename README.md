@@ -1,150 +1,152 @@
 # EVC Team Relay Plugin
 
-[![GitHub release](https://img.shields.io/github/v/release/entire-vc/evc-team-relay-obsidian-plugin?style=flat-square)](https://github.com/entire-vc/evc-team-relay-obsidian-plugin/releases)
-[![Downloads](https://img.shields.io/github/downloads/entire-vc/evc-team-relay-obsidian-plugin/total?style=flat-square)](https://github.com/entire-vc/evc-team-relay-obsidian-plugin/releases)
-[![License: MIT](https://img.shields.io/github/license/entire-vc/evc-team-relay-obsidian-plugin?style=flat-square)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/WoodGear1/evc-team-relay-selfhosted?style=flat-square)](https://github.com/WoodGear1/evc-team-relay-selfhosted/releases)
+[![Downloads](https://img.shields.io/github/downloads/WoodGear1/evc-team-relay-selfhosted/total?style=flat-square)](https://github.com/WoodGear1/evc-team-relay-selfhosted/releases)
+[![License: MIT](https://img.shields.io/github/license/WoodGear1/evc-team-relay-selfhosted?style=flat-square)](LICENSE)
 
-**Real-time collaboration and web publishing for Obsidian.**
+**Плагин для Obsidian с совместным редактированием в реальном времени и веб-публикацией.**
 
-> Edit notes together. Share folders with your team. Publish to the web. Self-hosted or hosted — your choice.
-
----
-
-## The Problem
-
-You love Obsidian, but your team needs more:
-- **Sharing a note** means exporting, copy/pasting, or screenshotting
-- **Collaborating** means switching to Notion or Google Docs
-- **Publishing** means paying $8/month for Obsidian Publish with limited control
-- **Git sync** works until two people edit the same file
-
-## The Solution
-
-**EVC Team Relay** adds multiplayer mode to Obsidian. CRDT-based real-time sync — no merge conflicts, works offline, your data stays on your server (or ours).
+> Можно вместе редактировать заметки, шарить папки команде и публиковать материалы в веб. Основной сценарий этого репозитория - self-hosted развёртывание.
 
 ---
 
-## What You Get
+## Что это
 
-### 🔄 Real-time Collaboration
-- Edit the same note simultaneously — changes merge automatically
-- Share entire folders with viewer or editor permissions
-- Works offline — edits sync when you reconnect
+`EVC Team Relay` добавляет в Obsidian мультиплеерный режим на базе CRDT:
 
-### 🌐 Web Publishing
-- Publish notes as a website with one click
-- Three modes: **public**, **protected** (link + token), **private** (login required)
-- Custom domains supported
-- Perfect for: internal wikis, client portals, project docs, personal sites
-- [Live example →](https://docs.entire.vc/team-relay/Demo)
-
-### 🔒 Your Data, Your Server
-- **Self-hosted:** deploy on your VPS with Docker Compose ([server repo](https://github.com/entire-vc/evc-team-relay))
-- **Hosted:** zero ops, connect and go ([entire.vc](https://entire.vc))
+- несколько человек могут редактировать одну заметку одновременно
+- изменения сливаются без merge conflict'ов
+- работа продолжается офлайн, а синхронизация догоняет после переподключения
+- общие папки можно выдавать с правами `viewer` или `editor`
+- заметки и папки можно публиковать в веб
 
 ---
 
-## Install
+## Что поменялось в этом репозитории
 
-### Option A — BRAT (recommended)
-1. Install **BRAT**: *Settings → Community plugins → Browse → "BRAT" → Install*
-2. Open BRAT: *Settings → BRAT → Add beta plugin*
-3. Paste: `https://github.com/entire-vc/evc-team-relay-obsidian-plugin`
-4. Enable: *Settings → Community plugins → EVC Team Relay → Enable*
+Это не просто зеркало апстрима, а отдельный self-hosted форк для публикации и установки плагина из репозитория [`WoodGear1/evc-team-relay-selfhosted`](https://github.com/WoodGear1/evc-team-relay-selfhosted).
 
-### Option B — Manual
-1. Download from [latest release](https://github.com/entire-vc/evc-team-relay-obsidian-plugin/releases)
-2. Copy to `.obsidian/plugins/evc-team-relay/`
-3. Enable in Settings
+В текущей сборке:
 
----
+- релизы, установка через BRAT и ручная установка привязаны к этому репозиторию
+- используется собственная версия сборки с суффиксом вида `-wgwg.*`, например `1.1.7-wgwg.4`
+- описание и позиционирование смещены в сторону self-hosted инфраструктуры
+- форк остаётся совместимым по основной идее с апстримом [`entire-vc/evc-team-relay-obsidian-plugin`](https://github.com/entire-vc/evc-team-relay-obsidian-plugin), но публикуется и сопровождается отдельно
 
-## Quickstart
-
-1. **Connect:** Plugin settings → Add server → enter your relay URL (or sign up at [entire.vc](https://entire.vc))
-2. **Share:** Right-click a folder → Share → invite by email
-3. **Collaborate:** Open a shared note — edits sync in real-time
-4. **Publish:** Right-click a note or folder → Publish to web
+Если нужна стабильная установка именно вашей self-hosted версии, ориентироваться надо на этот репозиторий, а не на апстрим.
 
 ---
 
-## Who Is This For?
+## Что умеет плагин
 
-### Small Teams (5-20 people)
-Replace Notion/Confluence. Keep Obsidian. Real-time collaboration without $8/user/month.
+### Совместная работа в реальном времени
 
-### Consultants & Freelancers
-Share deliverables with clients via protected web publish. No "can you export that as PDF?"
+- одновременное редактирование одной заметки
+- автоматическое слияние изменений
+- общие папки с разграничением прав доступа
+- работа офлайн с последующей досинхронизацией
 
-### Dev Teams
-Documentation that lives in Obsidian, accessible to the whole team. Pair with [Local Sync](https://github.com/entire-vc/evc-local-sync-plugin) for repo `/docs` ↔ vault sync.
+### Веб-публикация
 
-### Content Creators
-Publish your vault as a beautiful website. Better than Obsidian Publish — custom domains, access control, flat pricing.
+- публикация заметок и папок в веб в несколько кликов
+- режимы доступа: `public`, `protected`, `private`
+- поддержка кастомных доменов
+- подходит для внутренних wiki, клиентских материалов, документации и публичных страниц
+- демо апстрима: [docs.entire.vc/team-relay/Demo](https://docs.entire.vc/team-relay/Demo)
+
+### Self-hosted режим
+
+- можно подключать свой control plane / relay server
+- данные остаются на вашем сервере
+- модель подходит для команд, которым нужен свой контур и свой доступ
 
 ---
 
-## Comparison
+## Установка
 
-| | Obsidian Sync | Notion | Google Docs | **Team Relay** |
+### Вариант A - через BRAT
+
+1. Установить плагин `BRAT` в Obsidian: `Settings -> Community plugins -> Browse -> BRAT -> Install`.
+2. Открыть `Settings -> BRAT -> Add beta plugin`.
+3. Вставить URL репозитория: `https://github.com/WoodGear1/evc-team-relay-selfhosted`.
+4. Дождаться установки и включить `EVC Team Relay` в списке community plugins.
+
+### Вариант B - вручную
+
+1. Скачать файлы из [последнего релиза](https://github.com/WoodGear1/evc-team-relay-selfhosted/releases).
+2. Скопировать их в `.obsidian/plugins/evc-team-relay/`.
+3. Включить плагин в настройках Obsidian.
+
+---
+
+## Быстрый старт
+
+1. Открыть настройки плагина и добавить URL вашего relay/control plane сервера.
+2. Авторизоваться или зарегистрироваться, если это предусмотрено вашим стендом.
+3. Расшарить папку или принять приглашение в уже существующую общую папку.
+4. Открыть общую заметку и проверить, что изменения синхронизируются в реальном времени.
+5. При необходимости использовать publish для заметки или папки.
+
+---
+
+## Кому это подходит
+
+### Небольшим командам
+
+Если вы хотите остаться в Obsidian, но получить совместное редактирование без переезда в Notion или Google Docs.
+
+### Разработке и техдокам
+
+Когда документация живёт в Obsidian, но должна быть доступна всей команде и синхронизироваться без конфликтов.
+
+### Консультантам и подрядчикам
+
+Когда нужно делиться материалами с клиентами через защищённую публикацию, а не отправлять экспортами и PDF.
+
+### Self-hosted инсталляциям
+
+Когда важны собственный сервер, собственный домен и контроль над данными.
+
+---
+
+## Сравнение
+
+| Возможность | Obsidian Sync | Notion | Google Docs | **Team Relay** |
 |---|---|---|---|---|
-| Real-time collab | ✗ | ✅ | ✅ | ✅ |
-| Works in Obsidian | ✅ | ✗ | ✗ | ✅ |
-| Web publish | via Publish | ✅ | ✅ | ✅ |
-| Self-hosted option | ✗ | ✗ | ✗ | ✅ |
-| Offline editing | ✅ | ✗ | ✗ | ✅ |
-| Your data, your server | ✗ | ✗ | ✗ | ✅ |
+| Совместное редактирование в реальном времени | ✗ | ✅ | ✅ | ✅ |
+| Работа внутри Obsidian | ✅ | ✗ | ✗ | ✅ |
+| Веб-публикация | через Publish | ✅ | ✅ | ✅ |
+| Self-hosted вариант | ✗ | ✗ | ✗ | ✅ |
+| Офлайн-редактирование | ✅ | ✗ | ✗ | ✅ |
+| Данные на вашей стороне | ✗ | ✗ | ✗ | ✅ |
 
 ---
 
-## Feedback
+## Сетевое взаимодействие
 
-- [Report a bug →](https://github.com/entire-vc/evc-team-relay-obsidian-plugin/issues/new?template=bug-report.yml)
-- [Request a feature →](https://github.com/entire-vc/evc-team-relay-obsidian-plugin/issues/new?template=feature-request.yml)
-- [Report a web publish issue →](https://github.com/entire-vc/evc-team-relay-obsidian-plugin/issues/new?template=web-publish.yml)
+Плагин ходит только в те серверы, которые указал пользователь в настройках.
 
----
+| Соединение | Протокол | Назначение | Когда используется |
+|---|---|---|---|
+| Control plane server | HTTPS | Логин, обновление токена, управление шарами и серверной конфигурацией | При входе и операциях управления |
+| Relay server | WSS | Синхронизация CRDT-документов в реальном времени | Во время работы с shared notes |
+| Control plane server | HTTPS | Выдача relay token | Перед открытием WebSocket-соединения |
+| OAuth callback на localhost | HTTP | Получение redirect после OAuth-логина | Во время OAuth-авторизации в desktop-клиенте |
 
-## Solo Workflow? No Server Needed
+Все URL серверов задаются пользователем. В кодовой базе по умолчанию всё ещё присутствуют значения и ссылки, пришедшие из апстрима, поэтому при self-hosted использовании ориентироваться нужно на адреса вашего собственного стенда.
 
-→ [**EVC Local Sync**](https://github.com/entire-vc/evc-local-sync-plugin) — bidirectional vault ↔ local folder sync for AI-assisted coding workflows.
-
----
-
-## Part of the Entire VC Toolbox
-
-| Product | What it does | Link |
-|---------|-------------|------|
-| **Local Sync** | Vault ↔ AI dev tools sync | [repo](https://github.com/entire-vc/evc-local-sync-plugin) |
-| **Team Relay** | Self-hosted collaboration server | [repo](https://github.com/entire-vc/evc-team-relay) |
-| **Team Relay Plugin** ← you are here | Obsidian plugin for Team Relay | this repo |
-| **Spark MCP** | MCP server for AI workflow catalog | [repo](https://github.com/entire-vc/evc-spark-mcp) |
-| **OpenClaw Skill** | AI agent ↔ vault access | [repo](https://github.com/entire-vc/evc-team-relay-openclaw-skill) |
+Телеметрия и сторонняя аналитика этой сборкой не заявлены.
 
 ---
 
+## Апстрим и ссылки
 
-## Network Usage
+- Текущий self-hosted форк: [WoodGear1/evc-team-relay-selfhosted](https://github.com/WoodGear1/evc-team-relay-selfhosted)
+- Апстрим-репозиторий: [entire-vc/evc-team-relay-obsidian-plugin](https://github.com/entire-vc/evc-team-relay-obsidian-plugin)
+- Issues этого форка: [github.com/WoodGear1/evc-team-relay-selfhosted/issues](https://github.com/WoodGear1/evc-team-relay-selfhosted/issues)
 
-This plugin makes network requests to **user-configured servers only**. No data is sent to third parties.
+---
 
-| Connection | Protocol | Purpose | When |
-|------------|----------|---------|------|
-| Control plane server | HTTPS | Authentication (login, token refresh), share management (list, create, invite), server info, billing | On login, share operations, periodic token refresh |
-| Relay server | WebSocket (WSS) | Real-time CRDT document synchronization between collaborators | While editing shared documents |
-| Control plane server | HTTPS | Relay token issuance (Ed25519-signed) | Before opening a WebSocket connection |
-| OAuth callback (localhost) | HTTP | Receives OAuth redirect on `127.0.0.1` (desktop only) | During OAuth login flow |
+## Лицензия
 
-**All server URLs are configured by the user** in plugin settings. The default configuration includes `https://cp.tr.entire.vc` (EVC Team Relay hosted), but the user can add, remove, or change servers.
-
-**No telemetry or analytics data is collected.** The plugin does not phone home, track usage, or send any data to third-party services.
-
-## Community
-
-- 🌐 [entire.vc](https://entire.vc)
-- 💬 [Discussions](https://github.com/entire-vc/.github/discussions)
-- 📧 in@entire.vc
-
-## License
-
-MIT — Copyright (c) 2026 Entire VC
+MIT. Базовый проект происходит из экосистемы Entire VC; текущий форк публикуется отдельно.

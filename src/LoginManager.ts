@@ -845,6 +845,14 @@ export class LoginManager extends Observable<LoginManager> {
 		return this.activeServerId;
 	}
 
+	getActiveServerUrl(): string | undefined {
+		if (!this.isRelayOnPrem || !this.relayOnPremSettings || !this.activeServerId) {
+			return undefined;
+		}
+		const server = getServerById(this.relayOnPremSettings, this.activeServerId);
+		return server?.controlPlaneUrl?.replace(/\/+$/, "");
+	}
+
 	/**
 	 * Get list of logged-in server IDs
 	 */

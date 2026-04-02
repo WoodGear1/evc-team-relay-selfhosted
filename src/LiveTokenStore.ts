@@ -193,7 +193,9 @@ export class LiveTokenStore extends TokenStore<ClientToken> {
 			"Relay-Version": GIT_TAG,
 			"Content-Type": "application/json",
 		};
-		const apiUrl = this.loginManager.getEndpointManager().getApiUrl();
+		const apiUrl =
+			(this.loginManager.isRelayOnPremMode() && this.loginManager.getActiveServerUrl()) ||
+			this.loginManager.getEndpointManager().getApiUrl();
 		const response = await customFetch(`${apiUrl}/file-token`, {
 			method: "POST",
 			headers: headers,
