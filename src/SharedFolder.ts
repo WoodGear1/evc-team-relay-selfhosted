@@ -388,9 +388,15 @@ export class SharedFolder extends HasProvider {
 			if (this.syncStore.canSync(vpath)) {
 				if (upload) {
 					const file = this.uploadSyncFile(vpath, false);
+					if (!this.syncStore.hasYMapEntry(vpath)) {
+						void this.markUploaded(file);
+					}
 					files.push(file);
 				} else {
 					const file = this.syncFile(vpath, false);
+					if (!this.syncStore.hasYMapEntry(vpath)) {
+						void this.markUploaded(file);
+					}
 					files.push(file);
 				}
 			}

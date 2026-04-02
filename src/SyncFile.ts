@@ -457,7 +457,8 @@ export class SyncFile
 		this.log("verify upload");
 		this._refreshMeta();
 		if (!this.meta) {
-			throw new Error("cannot verify upload without meta");
+			this.warn("verifyUpload called without meta", this.path);
+			return false;
 		}
 		return this.sharedFolder.cas.verify(this);
 	}
