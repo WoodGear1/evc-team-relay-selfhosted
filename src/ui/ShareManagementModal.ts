@@ -10,9 +10,10 @@ import type Live from "../main";
 import { RelayOnPremShareClient, type RelayOnPremShare, type ShareMember, type Invite, type FolderItem } from "../RelayOnPremShareClient";
 import { RelayOnPremShareClientManager, type ShareWithServer } from "../RelayOnPremShareClientManager";
 import { FolderSuggestModal } from "./FolderSuggestModal";
+import { LinkManagementModal } from "./LinkManagementModal";
 import { getDefaultServer, type RelayOnPremServer } from "../RelayOnPremConfig";
 import { S3RN } from "../S3RN";
-import { confirmDialog, promptDialog } from "./dialogs";
+import { choiceDialog, confirmDialog, promptDialog } from "./dialogs";
 
 export class ShareManagementModal extends Modal {
 	private shares: ShareWithServer[] = [];
@@ -632,7 +633,7 @@ export class ShareManagementModal extends Modal {
 
 		new Setting(contentEl)
 			.setName("Publish to web")
-			.setDesc("Make this share accessible via a web URL")
+			.setDesc("Make this share accessible via a web URL and then manage published links")
 			.addToggle((toggle) => {
 				toggle
 					.setValue(isPublished)
@@ -643,6 +644,18 @@ export class ShareManagementModal extends Modal {
 
 		// Show web URL and additional options when published
 		if (isPublished && this.selectedShare.web_url) {
+			new Setting(contentEl)
+				.setName("Published link settings")
+				.setDesc("Create public, members-only, or password-protected links for this published page")
+				.addButton((button) => {
+					button
+						.setButtonText("Manage links")
+						.setCta()
+						.onClick(() => {
+							this.openPublishedLinks();
+						});
+				});
+
 			// Web URL with copy button
 			new Setting(contentEl)
 				.setName("Web URL")
@@ -955,30 +968,54 @@ export class ShareManagementModal extends Modal {
 
 		// Warn if enabling web-publish on a private share
 		if (enabled && this.selectedShare.visibility === "private") {
-			const makePublic = await confirmDialog(
+			const newVisibility = await choiceDialog(
 				this.app,
-				"This share is private. Web-published pages from private shares require authentication.\n\n" +
-				"Would you like to change visibility to public so anyone can view the web page?\n\n" +
-				"Click OK to make public, or Cancel to keep private."
+				'This share is private. Web publishing requires "public" or "protected" visibility. Choose how you want to publish:',
+				[
+					{ label: "Make public (open access)", value: "public" },
+					{ label: "Make protected (password)", value: "protected" },
+				],
 			);
-			if (makePublic) {
+			if (!newVisibility) return;
+
+			try {
+				const updateVisibilityPayload: { visibility: "public" | "protected"; password?: string } = {
+					visibility: newVisibility as "public" | "protected",
+				};
+				if (newVisibility === "protected") {
+					const password = await promptDialog(
+						this.app,
+						"Enter password for the protected web publication:",
+					);
+					if (!password || password.trim().length < 8) {
+						new Notice("Password must be at least 8 characters");
+						return;
+					}
+					updateVisibilityPayload.password = password.trim();
+				}
+
 				try {
 					if (this.plugin.shareClientManager) {
 						await this.plugin.shareClientManager.updateShare(
 							this.selectedShare.serverId,
 							this.selectedShare.id,
-							{ visibility: "public" }
+							updateVisibilityPayload,
 						);
 					} else if (this.plugin.shareClient) {
 						await this.plugin.shareClient.updateShare(
 							this.selectedShare.id,
-							{ visibility: "public" }
+							updateVisibilityPayload,
 						);
 					}
-					this.selectedShare = { ...this.selectedShare, visibility: "public" };
+					this.selectedShare = { ...this.selectedShare, visibility: newVisibility as "public" | "protected" };
 				} catch (e: unknown) {
 					console.error("Failed to change visibility:", e);
+					new Notice("Failed to change share visibility for web publishing");
+					return;
 				}
+			} catch (error: unknown) {
+				new Notice(error instanceof Error ? error.message : "Failed to prepare protected publish");
+				return;
 			}
 		}
 
@@ -1056,6 +1093,32 @@ export class ShareManagementModal extends Modal {
 			console.error("Failed to read document content:", error);
 			return null;
 		}
+	}
+
+	private getActiveShareClient(): RelayOnPremShareClient | null {
+		if (this.selectedShare?.serverId && this.plugin.shareClientManager) {
+			return this.plugin.shareClientManager.getClient(this.selectedShare.serverId) || null;
+		}
+		return this.plugin.shareClient || null;
+	}
+
+	private openPublishedLinks() {
+		if (!this.selectedShare) return;
+		const client = this.getActiveShareClient();
+		if (!client) {
+			new Notice("No share client available");
+			return;
+		}
+
+		const modal = new LinkManagementModal(
+			this.app,
+			client,
+			this.selectedShare.id,
+			this.selectedShare.kind === "doc" ? "file" : "folder",
+			this.selectedShare.id,
+			this.selectedShare.path,
+		);
+		modal.open();
 	}
 
 	/**
