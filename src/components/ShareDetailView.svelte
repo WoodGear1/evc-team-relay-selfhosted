@@ -20,6 +20,7 @@
 		createInvite: void;
 		deleted: void;
 		back: void;
+		shareUpdated: { share: ShareWithServer };
 	}>();
 
 	let members: ShareMember[] = [];
@@ -29,6 +30,19 @@
 	let webPublishEnabled = false;
 	let webPublishDomain: string | null = null;
 	let currentShare = share;
+
+	$: if (
+		share.id !== currentShare.id ||
+		share.visibility !== currentShare.visibility ||
+		share.web_published !== currentShare.web_published ||
+		share.web_url !== currentShare.web_url ||
+		share.web_slug !== currentShare.web_slug ||
+		share.web_noindex !== currentShare.web_noindex ||
+		share.web_sync_mode !== currentShare.web_sync_mode
+	) {
+		currentShare = share;
+		editingSlug = currentShare.web_slug || "";
+	}
 
 	// Add member form
 	let newMemberEmail = "";
@@ -41,18 +55,68 @@
 		await loadDetails();
 	});
 
+	async function fetchCanonicalShare(baseShare: ShareWithServer = currentShare): Promise<ShareWithServer> {
+		if (plugin.shareClientManager) {
+			const freshShare = await plugin.shareClientManager.getShare(baseShare.serverId, baseShare.id);
+			return {
+				...freshShare,
+				serverId: baseShare.serverId,
+				serverName: baseShare.serverName,
+			};
+		}
+		if (plugin.shareClient) {
+			const freshShare = await plugin.shareClient.getShare(baseShare.id);
+			return {
+				...freshShare,
+				serverId: baseShare.serverId,
+				serverName: baseShare.serverName,
+			};
+		}
+		return baseShare;
+	}
+
+	function applyCurrentShare(nextShare: ShareWithServer, notifyParent = true) {
+		currentShare = nextShare;
+		editingSlug = currentShare.web_slug || "";
+		if (notifyParent) {
+			dispatch("shareUpdated", { share: nextShare });
+		}
+	}
+
+	async function refreshCurrentShare(
+		fallback: Partial<ShareWithServer> = {},
+		notifyParent = true,
+	): Promise<ShareWithServer> {
+		const optimisticShare: ShareWithServer = {
+			...currentShare,
+			...fallback,
+		};
+
+		try {
+			const canonicalShare = await fetchCanonicalShare(optimisticShare);
+			applyCurrentShare(canonicalShare, notifyParent);
+			return canonicalShare;
+		} catch {
+			applyCurrentShare(optimisticShare, notifyParent);
+			return optimisticShare;
+		}
+	}
+
 	async function loadDetails() {
 		loading = true;
 		try {
+			const canonicalShare = await fetchCanonicalShare(currentShare);
+			applyCurrentShare(canonicalShare, false);
+
 			// Determine ownership
 			const multiServerAuth = plugin.loginManager.getMultiServerAuthManager();
 			if (multiServerAuth) {
-				const currentUser = multiServerAuth.getUserForServer(share.serverId);
-				isOwner = currentUser?.id === share.owner_user_id;
+				const currentUser = multiServerAuth.getUserForServer(canonicalShare.serverId);
+				isOwner = currentUser?.id === canonicalShare.owner_user_id;
 			} else {
 				const authProvider = plugin.loginManager.getAuthProvider();
 				const currentUser = authProvider?.getCurrentUser();
-				isOwner = currentUser?.id === share.owner_user_id;
+				isOwner = currentUser?.id === canonicalShare.owner_user_id;
 			}
 
 			// Load all data in parallel
@@ -120,7 +184,7 @@
 
 	function getShareClient(): RelayOnPremShareClient | null {
 		if (plugin.shareClientManager) {
-			return plugin.shareClientManager.getClient(share.serverId) || null;
+			return plugin.shareClientManager.getClient(currentShare.serverId) || null;
 		}
 		return plugin.shareClient || null;
 	}
@@ -268,15 +332,15 @@
 			if (password) payload.password = password;
 			let updated;
 			if (plugin.shareClientManager) {
-				updated = await plugin.shareClientManager.updateShare(share.serverId, share.id, payload);
+				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, payload);
 			} else if (plugin.shareClient) {
-				updated = await plugin.shareClient.updateShare(share.id, payload);
+				updated = await plugin.shareClient.updateShare(currentShare.id, payload);
 			}
-			if (updated) currentShare = { ...currentShare, ...updated };
+			if (updated) await refreshCurrentShare(updated);
 			new Notice(`Visibility changed to ${newVisibility}`);
 		} catch (e: unknown) {
 			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
-			currentShare = { ...currentShare };
+			await refreshCurrentShare({}, false);
 		}
 	}
 
@@ -314,7 +378,10 @@
 					{ label: "Make protected (password)", value: "protected" },
 				]
 			);
-			if (!newVisibility) return; // User cancelled — don't publish
+			if (!newVisibility) {
+				await refreshCurrentShare({}, false);
+				return;
+			}
 
 			try {
 				const payload: { visibility: "public" | "protected"; password?: string } = {
@@ -327,16 +394,17 @@
 					);
 					if (!password || password.trim().length < 8) {
 						new Notice("Password must be at least 8 characters");
+						await refreshCurrentShare({}, false);
 						return;
 					}
 					payload.password = password.trim();
 				}
 				if (plugin.shareClientManager) {
-					await plugin.shareClientManager.updateShare(share.serverId, share.id, payload);
+					await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, payload);
 				} else if (plugin.shareClient) {
-					await plugin.shareClient.updateShare(share.id, payload);
+					await plugin.shareClient.updateShare(currentShare.id, payload);
 				}
-				currentShare = { ...currentShare, visibility: newVisibility };
+				await refreshCurrentShare({ visibility: newVisibility as "public" | "protected" });
 			} catch (e: unknown) {
 				if (e instanceof VisibilityNotAllowedApiError) {
 					const info = e.visibilityInfo;
@@ -349,6 +417,7 @@
 					console.error("Failed to change visibility:", e);
 					new Notice("Failed to change visibility");
 				}
+				await refreshCurrentShare({}, false);
 				return;
 			}
 		}
@@ -369,13 +438,15 @@
 
 			let updated;
 			if (plugin.shareClientManager) {
-				updated = await plugin.shareClientManager.updateShare(share.serverId, share.id, updatePayload);
+				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, updatePayload);
 			} else if (plugin.shareClient) {
-				updated = await plugin.shareClient.updateShare(share.id, updatePayload);
+				updated = await plugin.shareClient.updateShare(currentShare.id, updatePayload);
 			}
 			if (updated) {
-				currentShare = { ...currentShare, ...updated };
-				editingSlug = currentShare.web_slug || "";
+				await refreshCurrentShare({
+					...updated,
+					web_published: updated.web_published ?? enabled,
+				});
 			}
 			new Notice(enabled ? "Published to web!" : "Unpublished from web");
 		} catch (e: unknown) {
@@ -396,6 +467,7 @@
 			} else {
 				new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
 			}
+			await refreshCurrentShare({}, false);
 		}
 	}
 
@@ -406,11 +478,11 @@
 				if (!content) { new Notice("Could not read document"); return; }
 				let updated;
 				if (plugin.shareClientManager) {
-					updated = await plugin.shareClientManager.updateShare(share.serverId, share.id, { web_content: content });
+					updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, { web_content: content });
 				} else if (plugin.shareClient) {
-					updated = await plugin.shareClient.updateShare(share.id, { web_content: content });
+					updated = await plugin.shareClient.updateShare(currentShare.id, { web_content: content });
 				}
-				if (updated) currentShare = { ...currentShare, ...updated };
+				if (updated) await refreshCurrentShare(updated);
 				new Notice("Content synced!");
 			} catch (e: unknown) {
 				new Notice(`Failed to sync: ${e instanceof Error ? e.message : "Unknown error"}`);
@@ -421,11 +493,11 @@
 				if (items.length === 0) { new Notice("Folder empty"); return; }
 				let updated;
 				if (plugin.shareClientManager) {
-					updated = await plugin.shareClientManager.updateShare(share.serverId, share.id, { web_folder_items: items });
+					updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, { web_folder_items: items });
 				} else if (plugin.shareClient) {
-					updated = await plugin.shareClient.updateShare(share.id, { web_folder_items: items });
+					updated = await plugin.shareClient.updateShare(currentShare.id, { web_folder_items: items });
 				}
-				if (updated) currentShare = { ...currentShare, ...updated };
+				if (updated) await refreshCurrentShare(updated);
 
 				// Sync file content
 				const slug = currentShare.web_slug;
@@ -460,14 +532,15 @@
 		try {
 			let updated;
 			if (plugin.shareClientManager) {
-				updated = await plugin.shareClientManager.updateShare(share.serverId, share.id, { web_noindex: noindex });
+				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, { web_noindex: noindex });
 			} else if (plugin.shareClient) {
-				updated = await plugin.shareClient.updateShare(share.id, { web_noindex: noindex });
+				updated = await plugin.shareClient.updateShare(currentShare.id, { web_noindex: noindex });
 			}
-			if (updated) currentShare = { ...currentShare, ...updated };
+			if (updated) await refreshCurrentShare(updated);
 			new Notice(noindex ? "Indexing disabled" : "Indexing enabled");
 		} catch (e: unknown) {
 			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+			await refreshCurrentShare({}, false);
 		}
 	}
 
@@ -475,11 +548,11 @@
 		try {
 			let updated;
 			if (plugin.shareClientManager) {
-				updated = await plugin.shareClientManager.updateShare(share.serverId, share.id, { web_sync_mode: mode });
+				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, { web_sync_mode: mode });
 			} else if (plugin.shareClient) {
-				updated = await plugin.shareClient.updateShare(share.id, { web_sync_mode: mode });
+				updated = await plugin.shareClient.updateShare(currentShare.id, { web_sync_mode: mode });
 			}
-			if (updated) currentShare = { ...currentShare, ...updated };
+			if (updated) await refreshCurrentShare(updated);
 			if (plugin.webSyncManager) {
 				if (mode === "auto") {
 					plugin.webSyncManager.registerAutoSyncShare(
@@ -496,6 +569,7 @@
 			}
 		} catch (e: unknown) {
 			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+			await refreshCurrentShare({}, false);
 		}
 	}
 
@@ -505,17 +579,17 @@
 		try {
 			let updated;
 			if (plugin.shareClientManager) {
-				updated = await plugin.shareClientManager.updateShare(share.serverId, share.id, { web_slug: newSlug });
+				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, { web_slug: newSlug });
 			} else if (plugin.shareClient) {
-				updated = await plugin.shareClient.updateShare(share.id, { web_slug: newSlug });
+				updated = await plugin.shareClient.updateShare(currentShare.id, { web_slug: newSlug });
 			}
 			if (updated) {
-				currentShare = { ...currentShare, ...updated };
-				editingSlug = currentShare.web_slug || "";
+				await refreshCurrentShare(updated);
 			}
 			new Notice(`Slug updated: ${newSlug}`);
 		} catch (e: unknown) {
 			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+			await refreshCurrentShare({}, false);
 		}
 	}
 

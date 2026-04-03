@@ -577,8 +577,9 @@ export class RelayOnPremShareClient {
 			}
 
 			const share: RelayOnPremShare = await response.json();
-			log(`Updated share: ${share.id}`);
-			return share;
+			const canonicalShare = await this.getShare(shareId).catch(() => share);
+			log(`Updated share: ${canonicalShare.id}`);
+			return canonicalShare;
 		} catch (error: unknown) {
 			log("Error updating share:", error);
 			throw error;

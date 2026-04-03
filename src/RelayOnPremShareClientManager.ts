@@ -247,9 +247,20 @@ export class RelayOnPremShareClientManager {
 		}
 
 		const share = await client.updateShare(shareId, request);
-		// Invalidate cache for this specific share
 		const cacheKey = `${serverId}:${shareId}`;
-		this.shareCache.delete(cacheKey);
+		const server = this.servers.get(serverId);
+		if (server) {
+			this.shareCache.set(cacheKey, {
+				share: {
+					...share,
+					serverId: server.id,
+					serverName: server.name,
+				},
+				timestamp: Date.now(),
+			});
+		} else {
+			this.shareCache.delete(cacheKey);
+		}
 		return share;
 	}
 

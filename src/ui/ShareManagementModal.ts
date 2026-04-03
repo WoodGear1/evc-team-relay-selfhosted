@@ -152,10 +152,57 @@ export class ShareManagementModal extends Modal {
 		}
 	}
 
+	private async getCanonicalShare(share: ShareWithServer): Promise<ShareWithServer> {
+		if (this.plugin.shareClientManager) {
+			const freshShare = await this.plugin.shareClientManager.getShare(share.serverId, share.id);
+			return {
+				...freshShare,
+				serverId: share.serverId,
+				serverName: share.serverName,
+			};
+		}
+		if (this.plugin.shareClient) {
+			const freshShare = await this.plugin.shareClient.getShare(share.id);
+			return {
+				...freshShare,
+				serverId: share.serverId,
+				serverName: share.serverName,
+			};
+		}
+		return share;
+	}
+
+	private updateShareInList(updatedShare: ShareWithServer) {
+		this.shares = this.shares.map((share) =>
+			share.id === updatedShare.id && share.serverId === updatedShare.serverId
+				? updatedShare
+				: share,
+		);
+	}
+
+	private async refreshSelectedShare(fallback: Partial<ShareWithServer> = {}) {
+		if (!this.selectedShare) return;
+
+		const current = {
+			...this.selectedShare,
+			...fallback,
+		};
+
+		try {
+			const canonical = await this.getCanonicalShare(current);
+			this.selectedShare = canonical;
+			this.updateShareInList(canonical);
+		} catch {
+			this.selectedShare = current;
+			this.updateShareInList(current);
+		}
+	}
+
 	private async loadShareDetails(share: ShareWithServer) {
 		try {
 			this.isLoading = true;
-			this.selectedShare = share;
+			const canonicalShare = await this.getCanonicalShare(share);
+			this.selectedShare = canonicalShare;
 			this.invites = [];
 			this.isOwner = false;
 
@@ -168,19 +215,19 @@ export class ShareManagementModal extends Modal {
 			// Determine if current user is the owner (local check, no network)
 			const multiServerAuth = this.plugin.loginManager.getMultiServerAuthManager();
 			if (multiServerAuth) {
-				const currentUser = multiServerAuth.getUserForServer(share.serverId);
-				this.isOwner = currentUser?.id === share.owner_user_id;
+				const currentUser = multiServerAuth.getUserForServer(canonicalShare.serverId);
+				this.isOwner = currentUser?.id === canonicalShare.owner_user_id;
 			} else {
 				const authProvider = this.plugin.loginManager.getAuthProvider();
 				const currentUser = authProvider?.getCurrentUser();
-				this.isOwner = currentUser?.id === share.owner_user_id;
+				this.isOwner = currentUser?.id === canonicalShare.owner_user_id;
 			}
 
 			// Run all API calls in parallel for faster loading
 			const serverInfoPromise = (async () => {
 				try {
 					if (this.plugin.shareClientManager) {
-						const client = this.plugin.shareClientManager.getClient(share.serverId);
+						const client = this.plugin.shareClientManager.getClient(canonicalShare.serverId);
 						if (client) {
 							return await client.getServerInfo();
 						}
@@ -195,9 +242,9 @@ export class ShareManagementModal extends Modal {
 
 			const membersPromise = (async () => {
 				if (this.plugin.shareClientManager) {
-					return this.plugin.shareClientManager.getShareMembers(share.serverId, share.id);
+					return this.plugin.shareClientManager.getShareMembers(canonicalShare.serverId, canonicalShare.id);
 				} else if (this.plugin.shareClient) {
-					return this.plugin.shareClient.getShareMembers(share.id);
+					return this.plugin.shareClient.getShareMembers(canonicalShare.id);
 				}
 				return [] as ShareMember[];
 			})();
@@ -206,9 +253,9 @@ export class ShareManagementModal extends Modal {
 				if (!this.isOwner) return [] as Invite[];
 				try {
 					if (this.plugin.shareClientManager) {
-						return await this.plugin.shareClientManager.listInvites(share.serverId, share.id);
+						return await this.plugin.shareClientManager.listInvites(canonicalShare.serverId, canonicalShare.id);
 					} else if (this.plugin.shareClient) {
-						return await this.plugin.shareClient.listInvites(share.id);
+						return await this.plugin.shareClient.listInvites(canonicalShare.id);
 					}
 				} catch (inviteError: unknown) {
 					const errorMessage = inviteError instanceof Error ? inviteError.message : "";
@@ -232,6 +279,7 @@ export class ShareManagementModal extends Modal {
 			this.webPublishDomain = serverInfo?.features?.web_publish_domain ?? null;
 			this.members = members;
 			this.invites = invites;
+			this.updateShareInList(canonicalShare);
 
 			this.renderContent();
 		} catch (error: unknown) {
@@ -606,10 +654,7 @@ export class ShareManagementModal extends Modal {
 				throw new Error("No share client available");
 			}
 
-			this.selectedShare = {
-				...this.selectedShare,
-				...updatedShare,
-			};
+			await this.refreshSelectedShare(updatedShare);
 
 			new Notice(`Visibility changed to ${visibility}`);
 			this.renderContent();
@@ -642,8 +687,8 @@ export class ShareManagementModal extends Modal {
 					});
 			});
 
-		// Show web URL and additional options when published
-		if (isPublished && this.selectedShare.web_url) {
+		// Show advanced web controls whenever publishing is enabled
+		if (isPublished) {
 			new Setting(contentEl)
 				.setName("Published link settings")
 				.setDesc("Create public, members-only, or password-protected links for this published page")
@@ -656,29 +701,47 @@ export class ShareManagementModal extends Modal {
 						});
 				});
 
-			// Web URL with copy button
-			new Setting(contentEl)
-				.setName("Web URL")
-				.setDesc(this.selectedShare.web_url)
-				.addButton((button) => {
-					button
-						.setButtonText("Copy link")
-						.onClick(() => {
-							if (this.selectedShare?.web_url) {
-								void navigator.clipboard.writeText(this.selectedShare.web_url);
-								new Notice("Web URL copied to clipboard!");
-							}
-						});
-				})
-				.addButton((button) => {
-					button
-						.setButtonText("Open")
-						.onClick(() => {
-							if (this.selectedShare?.web_url) {
-								window.open(this.selectedShare.web_url, "_blank");
-							}
-						});
-				});
+			if (this.selectedShare.web_url) {
+				new Setting(contentEl)
+					.setName("Web URL")
+					.setDesc(this.selectedShare.web_url)
+					.addButton((button) => {
+						button
+							.setButtonText("Copy link")
+							.onClick(() => {
+								if (this.selectedShare?.web_url) {
+									void navigator.clipboard.writeText(this.selectedShare.web_url);
+									new Notice("Web URL copied to clipboard!");
+								}
+							});
+					})
+					.addButton((button) => {
+						button
+							.setButtonText("Open")
+							.onClick(() => {
+								if (this.selectedShare?.web_url) {
+									window.open(this.selectedShare.web_url, "_blank");
+								}
+							});
+					});
+			} else {
+				new Setting(contentEl)
+					.setName("Web URL")
+					.setDesc("URL will be available after the initial publish sync.")
+					.addButton((button) => {
+						button
+							.setButtonText("Sync now")
+							.setCta()
+							.onClick(async () => {
+								if (this.selectedShare?.kind === "doc") {
+									await this.syncWebContent();
+								} else {
+									await this.syncFolderItems();
+								}
+								this.renderContent();
+							});
+					});
+			}
 
 			// Sync button (different for doc vs folder shares)
 			if (this.selectedShare.kind === "doc") {
@@ -785,10 +848,7 @@ export class ShareManagementModal extends Modal {
 				throw new Error("No share client available");
 			}
 
-			this.selectedShare = {
-				...this.selectedShare,
-				...updatedShare,
-			};
+			await this.refreshSelectedShare(updatedShare);
 
 			new Notice(`Web slug updated to: ${newSlug}`);
 			this.renderContent();
@@ -838,11 +898,7 @@ export class ShareManagementModal extends Modal {
 				web_published: updatedShare.web_published,
 			}));
 
-			// Update local state
-			this.selectedShare = {
-				...this.selectedShare,
-				...updatedShare,
-			};
+			await this.refreshSelectedShare(updatedShare);
 
 			// Sync content of each markdown file (v1.8 web editing)
 			const slug = this.selectedShare.web_slug;
@@ -929,11 +985,7 @@ export class ShareManagementModal extends Modal {
 				throw new Error("No share client available");
 			}
 
-			// Update local state
-			this.selectedShare = {
-				...this.selectedShare,
-				...updatedShare,
-			};
+			await this.refreshSelectedShare(updatedShare);
 
 			new Notice("Web content synced successfully!");
 		} catch (error: unknown) {
@@ -976,7 +1028,10 @@ export class ShareManagementModal extends Modal {
 					{ label: "Make protected (password)", value: "protected" },
 				],
 			);
-			if (!newVisibility) return;
+			if (!newVisibility) {
+				this.renderContent();
+				return;
+			}
 
 			try {
 				const updateVisibilityPayload: { visibility: "public" | "protected"; password?: string } = {
@@ -989,6 +1044,7 @@ export class ShareManagementModal extends Modal {
 					);
 					if (!password || password.trim().length < 8) {
 						new Notice("Password must be at least 8 characters");
+						this.renderContent();
 						return;
 					}
 					updateVisibilityPayload.password = password.trim();
@@ -1007,14 +1063,16 @@ export class ShareManagementModal extends Modal {
 							updateVisibilityPayload,
 						);
 					}
-					this.selectedShare = { ...this.selectedShare, visibility: newVisibility as "public" | "protected" };
+					await this.refreshSelectedShare({ visibility: newVisibility as "public" | "protected" });
 				} catch (e: unknown) {
 					console.error("Failed to change visibility:", e);
 					new Notice("Failed to change share visibility for web publishing");
+					this.renderContent();
 					return;
 				}
 			} catch (error: unknown) {
 				new Notice(error instanceof Error ? error.message : "Failed to prepare protected publish");
+				this.renderContent();
 				return;
 			}
 		}
@@ -1064,10 +1122,10 @@ export class ShareManagementModal extends Modal {
 			}
 
 			// Update local state
-			this.selectedShare = {
-				...this.selectedShare,
+			await this.refreshSelectedShare({
 				...updatedShare,
-			};
+				web_published: updatedShare?.web_published ?? enabled,
+			});
 
 			new Notice(enabled ? "Share published to web!" : "Share unpublished from web");
 			this.renderContent();
@@ -1075,6 +1133,7 @@ export class ShareManagementModal extends Modal {
 			new Notice(
 				`Failed to update web publishing: ${error instanceof Error ? error.message : "Unknown error"}`
 			);
+			this.renderContent();
 		}
 	}
 
@@ -1193,11 +1252,7 @@ export class ShareManagementModal extends Modal {
 				throw new Error("No share client available");
 			}
 
-			// Update local state
-			this.selectedShare = {
-				...this.selectedShare,
-				...updatedShare,
-			};
+			await this.refreshSelectedShare(updatedShare);
 
 			new Notice(noindex ? "Search engine indexing disabled" : "Search engine indexing enabled");
 		} catch (error: unknown) {
@@ -1231,11 +1286,7 @@ export class ShareManagementModal extends Modal {
 				throw new Error("No share client available");
 			}
 
-			// Update local state
-			this.selectedShare = {
-				...this.selectedShare,
-				...updatedShare,
-			};
+			await this.refreshSelectedShare(updatedShare);
 
 			// Register/unregister with WebSyncManager
 			if (this.plugin.webSyncManager) {

@@ -52,6 +52,10 @@
 		currentView = "shareDetail";
 	}
 
+	function handleShareUpdated(event: CustomEvent<{ share: ShareWithServer }>) {
+		selectedShare = event.detail.share;
+	}
+
 	function handleShareCreated() {
 		// Go back to shares list to see the new share
 		currentView = "shares";
@@ -177,6 +181,7 @@
 				share={selectedShare}
 				on:createInvite={() => { currentView = "createInvite"; }}
 				on:deleted={handleShareDeleted}
+				on:shareUpdated={handleShareUpdated}
 			/>
 		{:else if currentView === "createShare" && selectedServer}
 			<CreateShareView
