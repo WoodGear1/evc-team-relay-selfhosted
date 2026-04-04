@@ -321,7 +321,12 @@
 				currentShare = { ...currentShare }; // trigger re-render to reset
 				return;
 			}
-			password = input;
+			if (input.trim().length < 8) {
+				new Notice("Password must be at least 8 characters");
+				currentShare = { ...currentShare };
+				return;
+			}
+			password = input.trim();
 		}
 		if (!(await confirmDialog(plugin.app, `Change visibility to ${newVisibility}?`))) {
 			currentShare = { ...currentShare };

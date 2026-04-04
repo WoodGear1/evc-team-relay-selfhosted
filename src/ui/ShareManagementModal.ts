@@ -619,7 +619,12 @@ export class ShareManagementModal extends Modal {
 				this.renderContent(); // Re-render to reset dropdown
 				return;
 			}
-			password = passwordInput;
+			if (passwordInput.trim().length < 8) {
+				new Notice("Password must be at least 8 characters");
+				this.renderContent();
+				return;
+			}
+			password = passwordInput.trim();
 		}
 
 		// Confirm the change

@@ -534,6 +534,12 @@ export class RelayOnPremShareClient {
 						throw new LimitExceededApiError(limitError);
 					}
 				}
+				if (response.status === 422) {
+					const validationMessage = RelayOnPremShareClient.parseValidationError(errorText);
+					if (validationMessage) {
+						throw new Error(validationMessage);
+					}
+				}
 				throw new Error(`Failed to create share: ${response.status} ${errorText}`);
 			}
 
@@ -572,6 +578,12 @@ export class RelayOnPremShareClient {
 					if (limitError) throw new LimitExceededApiError(limitError);
 					const visError = RelayOnPremShareClient.parseVisibilityNotAllowedError(errorText);
 					if (visError) throw new VisibilityNotAllowedApiError(visError);
+				}
+				if (response.status === 422) {
+					const validationMessage = RelayOnPremShareClient.parseValidationError(errorText);
+					if (validationMessage) {
+						throw new Error(validationMessage);
+					}
 				}
 				throw new Error(`Failed to update share: ${response.status} ${errorText}`);
 			}
@@ -1111,6 +1123,41 @@ export class RelayOnPremShareClient {
 		} catch {
 			// Not a JSON response or not a visibility error
 		}
+		return null;
+	}
+
+	static parseValidationError(errorText: string): string | null {
+		try {
+			const data = JSON.parse(errorText);
+			const details = Array.isArray(data?.detail)
+				? data.detail
+				: Array.isArray(data?.error?.details)
+					? data.error.details
+					: null;
+
+			if (details && details.length > 0) {
+				const first = details[0];
+				const location = Array.isArray(first?.loc)
+					? first.loc.filter((part: string) => part !== "body").join(".")
+					: "";
+				const message = typeof first?.msg === "string" ? first.msg : null;
+
+				if (message) {
+					return location ? `${location}: ${message}` : message;
+				}
+			}
+
+			if (typeof data?.detail === "string") {
+				return data.detail;
+			}
+
+			if (typeof data?.error?.message === "string") {
+				return data.error.message;
+			}
+		} catch {
+			// Not a JSON validation error payload
+		}
+
 		return null;
 	}
 
