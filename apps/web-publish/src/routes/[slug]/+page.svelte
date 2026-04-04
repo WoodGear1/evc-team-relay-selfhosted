@@ -11,25 +11,6 @@
 	import { isRealtimeSyncAvailable } from '$lib/yjs';
 	import type { PageData } from './$types';
 	import { page } from '$app/stores';
-	import {
-		Dialog,
-		DialogContent,
-		DialogHeader,
-		DialogTitle,
-		DialogDescription,
-		DialogFooter,
-		Input,
-		Button,
-		Label,
-		Card,
-		CardHeader,
-		CardTitle,
-		CardDescription,
-		CardContent,
-		Separator,
-		Alert,
-		AlertDescription
-	} from '@entire-vc/ui-svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -136,24 +117,24 @@
 </svelte:head>
 
 {#if showPasswordModal}
-	<Dialog open={dialogOpen}>
-		<DialogContent class="sm:max-w-md">
-			<DialogHeader>
-				<DialogTitle>Protected Document</DialogTitle>
-				<DialogDescription>
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+		<div class="w-full max-w-md rounded-xl border border-border bg-background p-6 shadow-xl">
+			<div class="space-y-2">
+				<h2 class="text-xl font-semibold text-foreground">Protected Document</h2>
+				<p class="text-sm text-muted-foreground">
 					This document is password protected. Please enter the password to continue.
-				</DialogDescription>
-			</DialogHeader>
+				</p>
+			</div>
 
 			<form
 				onsubmit={(e) => {
 					e.preventDefault();
 					handlePasswordSubmit();
 				}}
-				class="space-y-4"
+				class="space-y-4 mt-5"
 			>
 				<div class="space-y-2">
-					<Label for="password">Password</Label>
+					<label for="password" class="text-sm font-medium text-foreground">Password</label>
 					<input
 						id="password"
 						type="password"
@@ -163,24 +144,26 @@
 						}}
 						placeholder="Enter password"
 						disabled={isAuthenticating}
-						class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+						class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
 					/>
 				</div>
 
 				{#if passwordError}
-					<Alert variant="destructive">
-						<AlertDescription>{passwordError}</AlertDescription>
-					</Alert>
+					<div class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+						{passwordError}
+					</div>
 				{/if}
 
-				<DialogFooter>
-					<Button type="submit" disabled={isAuthenticating} class="w-full">
-						{isAuthenticating ? 'Authenticating...' : 'Submit'}
-					</Button>
-				</DialogFooter>
+				<button
+					type="submit"
+					disabled={isAuthenticating}
+					class="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+				>
+					{isAuthenticating ? 'Authenticating...' : 'Submit'}
+				</button>
 			</form>
-		</DialogContent>
-	</Dialog>
+		</div>
+	</div>
 {:else if data.isFolder}
 	<!-- Folder view -->
 	<div class="w-full published-page" style={themeStyle}>
@@ -192,7 +175,7 @@
 			/>
 
 			<h1 class="text-4xl font-bold text-foreground mb-4 leading-tight">{data.share.path}</h1>
-			<Separator class="mb-8" />
+			<hr class="mb-8 border-border" />
 
 			<div class="flex gap-8 items-start">
 				<div class="flex-1 min-w-0 max-w-[800px]">
@@ -200,30 +183,28 @@
 						<!-- Show README.md content -->
 						<MarkdownViewer content={data.readmeContent} slug={data.share.web_slug} folderItems={data.folderItems} />
 					{:else if data.folderItems.length === 0}
-						<Card class="text-center border-dashed">
-							<CardHeader class="pb-2">
+						<div class="rounded-xl border border-dashed border-border bg-card p-8 text-center">
+							<div class="pb-2">
 								<div class="text-6xl mb-4">📂</div>
-								<CardTitle>Empty Folder</CardTitle>
-								<CardDescription>This folder doesn't contain any items yet.</CardDescription>
-							</CardHeader>
-						</Card>
+								<h2 class="text-xl font-semibold text-card-foreground">Empty Folder</h2>
+								<p class="text-sm text-muted-foreground">This folder doesn't contain any items yet.</p>
+							</div>
+						</div>
 					{:else}
-						<Card
-							class="text-center bg-gradient-to-br from-muted to-secondary border-0 shadow-md"
-						>
-							<CardHeader class="pb-2">
+						<div class="rounded-xl bg-gradient-to-br from-muted to-secondary p-8 text-center shadow-md">
+							<div class="pb-2">
 								<div class="text-6xl mb-4">📁</div>
-								<CardTitle>{data.share.path}</CardTitle>
-								<CardDescription>
+								<h2 class="text-xl font-semibold text-foreground">{data.share.path}</h2>
+								<p class="text-sm text-muted-foreground">
 									This folder contains {data.folderItems.length} item{data.folderItems.length !== 1
 										? 's'
 										: ''}.
-								</CardDescription>
-							</CardHeader>
-							<CardContent>
+								</p>
+							</div>
+							<div>
 								<p class="text-primary font-medium">Select a document from the sidebar to view.</p>
-							</CardContent>
-						</Card>
+							</div>
+						</div>
 					{/if}
 				</div>
 			</div>
@@ -248,7 +229,7 @@
 			/>
 
 			<h1 class="text-4xl font-bold text-foreground mb-4 leading-tight">{title}</h1>
-			<Separator class="mb-8" />
+			<hr class="mb-8 border-border" />
 
 			<div class="flex gap-8 items-start">
 				<div class="flex-1 min-w-0 max-w-[800px]">

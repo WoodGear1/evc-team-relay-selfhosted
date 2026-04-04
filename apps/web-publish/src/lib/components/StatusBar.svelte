@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { Badge, Button } from '@entire-vc/ui-svelte';
-
 	interface Props {
 		visibility: string;
 		updatedAt: string | null;
@@ -44,6 +42,16 @@
 	});
 
 	let copyButtonText = $state('Copy link');
+	const visibilityClass = $derived(() => {
+		switch (visibilityConfig().variant) {
+			case 'warning':
+				return 'badge-warning';
+			case 'destructive':
+				return 'badge-destructive';
+			default:
+				return 'badge-secondary';
+		}
+	});
 
 	function copyLink() {
 		navigator.clipboard.writeText(shareUrl);
@@ -79,25 +87,25 @@
 					<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
 				</svg>
 			{/if}
-			<Badge variant={visibilityConfig().variant} class="badge-compact">{visibilityConfig().label}</Badge>
+			<span class={`badge-compact ${visibilityClass()}`}>{visibilityConfig().label}</span>
 		</span>
 
 		<!-- Copy Link -->
-		<Button variant="ghost" size="sm" onclick={copyLink} class="btn-compact">
+		<button type="button" onclick={copyLink} class="btn-compact">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 				<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
 			</svg>
 			{copyButtonText}
-		</Button>
+		</button>
 
 		<!-- Back to folder -->
 		{#if showBackButton && backUrl}
-			<Button variant="ghost" size="sm" onclick={() => (window.location.href = backUrl)} class="btn-compact">
+			<button type="button" onclick={() => (window.location.href = backUrl)} class="btn-compact">
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
 				</svg>
 				Back
-			</Button>
+			</button>
 		{/if}
 	</div>
 </div>
@@ -136,15 +144,46 @@
 		gap: 0.25rem;
 	}
 
-	:global(.badge-compact) {
-		padding: 0.125rem 0.5rem !important;
-		font-size: 0.75rem !important;
+	.badge-compact {
+		display: inline-flex;
+		align-items: center;
+		border-radius: 999px;
+		padding: 0.125rem 0.5rem;
+		font-size: 0.75rem;
+		font-weight: 600;
 	}
 
-	:global(.btn-compact) {
-		padding: 0.25rem 0.5rem !important;
-		font-size: 0.75rem !important;
-		gap: 0.25rem !important;
-		height: auto !important;
+	.badge-secondary {
+		background: hsl(var(--secondary));
+		color: hsl(var(--secondary-foreground));
+	}
+
+	.badge-warning {
+		background: color-mix(in srgb, hsl(var(--primary)) 12%, transparent);
+		color: hsl(var(--foreground));
+	}
+
+	.badge-destructive {
+		background: color-mix(in srgb, hsl(var(--destructive)) 16%, transparent);
+		color: hsl(var(--destructive));
+	}
+
+	.btn-compact {
+		display: inline-flex;
+		align-items: center;
+		border: none;
+		border-radius: 0.375rem;
+		padding: 0.25rem 0.5rem;
+		font-size: 0.75rem;
+		gap: 0.25rem;
+		height: auto;
+		background: transparent;
+		color: hsl(var(--muted-foreground));
+		cursor: pointer;
+	}
+
+	.btn-compact:hover {
+		background: hsl(var(--muted));
+		color: hsl(var(--foreground));
 	}
 </style>

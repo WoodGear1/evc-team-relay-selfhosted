@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@entire-vc/ui-svelte';
 	import {
 		buildFileTree,
 		loadExpandedState,
@@ -190,23 +189,25 @@
 {#snippet renderNode(node: TreeNode, depth: number)}
 	{#if node.type === 'folder' && node.children.length > 0}
 		<!-- Folder with children -->
-		<Collapsible open={isExpanded(node.path)} onOpenChange={() => toggleExpanded(node.path)}>
-			<CollapsibleTrigger
+		<details class="tree-folder" open={isExpanded(node.path)}>
+			<summary
 				class="tree-item folder {isActive(node) ? 'active' : ''}"
 				style="--depth: {depth}"
+				onclick={(event) => {
+					event.preventDefault();
+					toggleExpanded(node.path);
+				}}
 			>
 				{@render chevronIcon(isExpanded(node.path))}
 				<span class="icon">{@render folderIcon(isExpanded(node.path))}</span>
 				<span class="name">{node.name}</span>
-			</CollapsibleTrigger>
-			<CollapsibleContent>
-				<div class="tree-children">
-					{#each node.children as child}
-						{@render renderNode(child, depth + 1)}
-					{/each}
-				</div>
-			</CollapsibleContent>
-		</Collapsible>
+			</summary>
+			<div class="tree-children">
+				{#each node.children as child}
+					{@render renderNode(child, depth + 1)}
+				{/each}
+			</div>
+		</details>
 	{:else if node.type === 'folder'}
 		<!-- Empty folder - link to folder view -->
 		<a
@@ -346,15 +347,27 @@
 	}
 
 	/* Animation for collapsible - scoped to file-tree only */
-	.file-tree :global([data-collapsible-content]) {
+	.tree-folder {
+		margin: 0;
+	}
+
+	.tree-folder > summary {
+		list-style: none;
+	}
+
+	.tree-folder > summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.tree-folder > .tree-children {
 		overflow: hidden;
 	}
 
-	.file-tree :global([data-collapsible-content][data-state='open']) {
+	.tree-folder[open] > .tree-children {
 		animation: slideDown 0.2s ease-out;
 	}
 
-	.file-tree :global([data-collapsible-content][data-state='closed']) {
+	.tree-folder:not([open]) > .tree-children {
 		animation: slideUp 0.2s ease-out;
 	}
 

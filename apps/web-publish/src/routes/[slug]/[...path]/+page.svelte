@@ -2,15 +2,6 @@
 	import MarkdownViewer from '$lib/components/MarkdownViewer.svelte';
 	import StatusBar from '$lib/components/StatusBar.svelte';
 	import { extractDescription } from '$lib/markdown';
-	import {
-		Breadcrumb,
-		BreadcrumbList,
-		BreadcrumbItem,
-		BreadcrumbLink,
-		BreadcrumbSeparator,
-		BreadcrumbPage,
-		Separator
-	} from '@entire-vc/ui-svelte';
 	import { page } from '$app/stores';
 	import type { PageData } from './$types';
 
@@ -48,19 +39,13 @@
 
 <div class="w-full">
 	<article class="max-w-[900px] mx-auto">
-		<Breadcrumb class="mb-4 text-sm" style="padding-left: 0;">
-			<BreadcrumbList class="gap-1.5 pl-0">
-				<BreadcrumbItem>
-					<BreadcrumbLink href="/{data.parentSlug}" class="text-muted-foreground hover:text-foreground transition-colors">
-						{data.share.path}
-					</BreadcrumbLink>
-				</BreadcrumbItem>
-				<BreadcrumbSeparator class="text-muted-foreground/50" />
-				<BreadcrumbItem>
-					<BreadcrumbPage class="text-muted-foreground font-normal">{data.file.name}</BreadcrumbPage>
-				</BreadcrumbItem>
-			</BreadcrumbList>
-		</Breadcrumb>
+		<nav class="mb-4 flex items-center gap-2 text-sm" aria-label="Breadcrumb">
+			<a href="/{data.parentSlug}" class="text-muted-foreground hover:text-foreground transition-colors">
+				{data.share.path}
+			</a>
+			<span class="text-muted-foreground/50">/</span>
+			<span class="text-muted-foreground">{data.file.name}</span>
+		</nav>
 
 		<StatusBar
 			visibility={data.share.visibility}
@@ -71,7 +56,7 @@
 		/>
 
 		<h1 class="text-3xl font-bold text-foreground mb-4 leading-tight">{data.file.name}</h1>
-		<Separator class="mb-8" />
+		<hr class="mb-8 border-border" />
 
 		<div class="flex gap-8 items-start">
 			<div class="flex-1 min-w-0 max-w-[800px]">

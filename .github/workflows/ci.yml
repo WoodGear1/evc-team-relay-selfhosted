@@ -99,6 +99,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm install --legacy-peer-deps
+      - run: cp infra/env.example infra/.env
       - name: Validate base compose
         run: docker compose -f infra/docker-compose.yml config
       - name: Validate image-first compose
