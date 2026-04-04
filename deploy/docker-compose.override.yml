@@ -1,0 +1,64 @@
+services:
+  caddy:
+    profiles:
+      - disabled
+
+  control-plane:
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/control-plane:${EVC_RELEASE_TAG:-latest}
+    build: !reset null
+    ports:
+      - "3100:8000"
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/uploads:/app/app/static/uploads
+      - /mnt/tank/docker-containers/obsidian-relay/keys:/keys:ro
+
+  control-plane-migrate:
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/control-plane:${EVC_RELEASE_TAG:-latest}
+    build: !reset null
+
+  webhook-worker:
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/control-plane:${EVC_RELEASE_TAG:-latest}
+    build: !reset null
+
+  email-worker:
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/control-plane:${EVC_RELEASE_TAG:-latest}
+    build: !reset null
+
+  web-publish:
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/web-publish:${EVC_RELEASE_TAG:-latest}
+    build: !reset null
+    ports:
+      - "3300:3000"
+
+  relay-server:
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/relay-server:${EVC_RELEASE_TAG:-latest}
+    build: !reset null
+    ports:
+      - "3200:8080"
+      - "3201:9090"
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/relay:/app/data
+
+  postgres:
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/postgres:/var/lib/postgresql/data
+
+  postgres-backup:
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/backups:/backups
+
+  minio:
+    ports:
+      - "3202:9000"
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/minio:/data
+
+  prometheus:
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/prometheus:/prometheus
+
+  grafana:
+    ports:
+      - "3001:3000"
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/grafana:/var/lib/grafana

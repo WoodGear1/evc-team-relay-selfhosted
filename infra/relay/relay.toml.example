@@ -1,0 +1,28 @@
+[server]
+# Public URL used by clients; DOMAIN_BASE is interpolated during deploy
+url = "https://relay.example.com"
+host = "0.0.0.0"
+port = 8080
+
+[metrics]
+port = 9090
+
+[logging]
+level = "info"
+format = "pretty"
+
+# Auth keys from control plane
+# Get these values from: curl https://cp.YOUR_DOMAIN/keys/public
+# If RELAY_PRIVATE_KEY is set in .env, the control plane uses a stable keypair.
+# Otherwise, it auto-generates one on each startup (check control-plane logs).
+[[auth]]
+key_id = "REPLACE_WITH_KEY_ID"
+public_key = "REPLACE_WITH_PUBLIC_KEY_BASE64"
+
+[store]
+type = "minio"
+bucket = "relay"
+endpoint = "http://minio:9000"
+access_key = "MINIO_ROOT_USER"
+secret_key = "MINIO_ROOT_PASSWORD"
+prefix = ""

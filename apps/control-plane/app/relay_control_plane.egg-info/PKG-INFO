@@ -1,0 +1,34 @@
+Metadata-Version: 2.4
+Name: relay-control-plane
+Version: 0.1.0
+Summary: Relay Control Plane Lite service
+Requires-Python: >=3.12
+Requires-Dist: fastapi<1.0,>=0.115.0
+Requires-Dist: pydantic[email]<3.0,>=2.7
+Requires-Dist: pydantic-settings<3.0,>=2.2
+Requires-Dist: sqlalchemy<3.0,>=2.0.25
+Requires-Dist: alembic<2.0,>=1.12
+Requires-Dist: passlib[bcrypt]<2.0,>=1.7.4
+Requires-Dist: bcrypt<4.0,>=3.2
+Requires-Dist: PyJWT<3.0,>=2.8.0
+Requires-Dist: cryptography<43.0,>=41.0.0
+Requires-Dist: psycopg[binary]<4.0,>=3.1
+Requires-Dist: uvicorn<1.0,>=0.23
+Requires-Dist: slowapi<0.2.0,>=0.1.9
+Requires-Dist: jinja2<4.0,>=3.1.0
+Requires-Dist: python-multipart<0.1.0,>=0.0.9
+Requires-Dist: authlib<2.0,>=1.3.0
+Requires-Dist: httpx<0.28.0,>=0.27.0
+Requires-Dist: pyotp<3.0,>=2.9.0
+Requires-Dist: qrcode<8.0,>=7.4
+Requires-Dist: pillow<11.0,>=10.0
+Requires-Dist: prometheus-client<1.0,>=0.20.0
+Requires-Dist: python-json-logger<3.0,>=2.0.0
+Requires-Dist: cwt<3.0,>=2.7.0
+Requires-Dist: cbor2<6.0,>=5.6.0
+Requires-Dist: minio<8.0,>=7.2.0
+Provides-Extra: test
+Requires-Dist: pytest<9.0,>=8.1; extra == "test"
+Requires-Dist: httpx<0.28,>=0.26; extra == "test"
+Provides-Extra: dev
+Requires-Dist: ruff<0.7.0,>=0.6.9; extra == "dev"

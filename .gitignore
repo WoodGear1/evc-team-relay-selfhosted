@@ -1,30 +1,41 @@
-# vscode
-.vscode 
-
-# Intellij
-*.iml
+# editors
+.vscode
 .idea
+*.iml
 
-# npm
-node_modules
+# dependencies
+node_modules/
+apps/web-publish/node_modules/
+apps/plugin/node_modules/
 
-*.js
-!src/storage/y-indexeddb.js
-
-# Exclude sourcemaps
+# generated outputs
 *.map
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.svelte-kit/
+build/
+dist/
 
-# obsidian
+# keep vendored runtime file
+!apps/plugin/src/storage/y-indexeddb.js
+
+# local runtime files
 data.json
-
-# Exclude macOS Finder (System Explorer) View States
-.DS_Store
 vaults/
+.DS_Store
 
-# IDE & Tools (not for OSS)
+# env and local state
+.env
+infra/.env
+apps/control-plane/.venv/
+apps/control-plane/.python-version
+
+# agent and local docs
 .cursor/
 .claude/
 CLAUDE.md
-
-# Internal documentation (not for OSS)
 dev-docs/

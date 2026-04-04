@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<script>
+			(() => {
+				const storageKey = 'theme-mode';
+				const themeAttribute = 'data-theme';
+				const themeModeAttribute = 'data-theme-mode';
+				const highlightId = 'hljs-theme-link';
+				const lightHighlightHref =
+					'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github.min.css';
+				const darkHighlightHref =
+					'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css';
+				const root = document.documentElement;
+				const storedMode = localStorage.getItem(storageKey);
+				const themeMode =
+					storedMode === 'light' || storedMode === 'dark' || storedMode === 'system'
+						? storedMode
+						: 'system';
+				const prefersDark =
+					typeof window.matchMedia === 'function' &&
+					window.matchMedia('(prefers-color-scheme: dark)').matches;
+				const resolvedTheme =
+					themeMode === 'system' ? (prefersDark ? 'dark' : 'light') : themeMode;
+
+				root.setAttribute(themeAttribute, resolvedTheme);
+				root.setAttribute(themeModeAttribute, themeMode);
+				root.classList.toggle('dark', resolvedTheme === 'dark');
+				root.style.colorScheme = resolvedTheme;
+
+				let highlightLink = document.getElementById(highlightId);
+				if (!highlightLink) {
+					highlightLink = document.createElement('link');
+					highlightLink.id = highlightId;
+					highlightLink.rel = 'stylesheet';
+					document.head.appendChild(highlightLink);
+				}
+
+				highlightLink.href =
+					resolvedTheme === 'dark' ? darkHighlightHref : lightHighlightHref;
+			})();
+		</script>
+		<link rel="icon" href="%sveltekit.assets%/evc-ava.svg" type="image/svg+xml" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>

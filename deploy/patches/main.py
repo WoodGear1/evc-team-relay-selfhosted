@@ -1,0 +1,359 @@
+from __future__ import annotations
+
+import logging
+import os
+import re as _re
+from datetime import datetime, timedelta, timezone
+
+import jwt as pyjwt
+from cryptography.hazmat.primitives import serialization
+
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError, SQLAlchemyError
+from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.api.routers import (
+    admin,
+    admin_ui,
+    auth,
+    comments,
+    dashboard,
+    health,
+    invites,
+    keys,
+    metrics,
+    oauth,
+    published_links,
+    server,
+    shares,
+    tokens,
+    users,
+    web,
+    webhooks,
+)
+from app.api.routers.admin_ui import AdminAuthRedirect
+from app.core import security
+from app.core.config import get_settings
+from app.core.logging import configure_logging, get_logger
+from app.db.session import get_db, get_sessionmaker
+from app.middleware import errors, logging as req_logging
+from app.middleware.metrics import PrometheusMiddleware
+from app.services import auth_service
+
+# Rate limiter configuration
+limiter = Limiter(key_func=get_remote_address)
+
+
+tags_metadata = [
+    {"name": "meta", "description": "Health and metadata endpoints"},
+    {"name": "auth", "description": "Authentication and session APIs"},
+    {"name": "oauth", "description": "OAuth/OIDC authentication"},
+    {"name": "users", "description": "User search and lookup"},
+    {"name": "admin", "description": "Administrative endpoints"},
+    {"name": "dashboard", "description": "Dashboard statistics and insights"},
+    {"name": "shares", "description": "Share metadata management"},
+    {"name": "invites", "description": "Share invite link management and redemption"},
+    {"name": "tokens", "description": "Token issuance for relay access"},
+    {"name": "keys", "description": "Public key distribution for JWT verification"},
+    {"name": "webhooks", "description": "Webhook management for event notifications"},
+    {"name": "web", "description": "Web publishing public API"},
+    {"name": "published-links", "description": "Published link management and lifecycle"},
+    {"name": "comments", "description": "Comment threads and replies"},
+]
+
+
+# ─── File-token endpoint models ─────────────────────────────────────────────
+
+class FileTokenRequest(BaseModel):
+    docId: str
+    relay: str | None = None
+    folder: str | None = None
+    hash: str
+    contentType: str | None = None
+    contentLength: int | None = None
+
+
+class FileTokenResponse(BaseModel):
+    baseUrl: str
+    token: str
+    docId: str
+
+
+def build_app() -> FastAPI:
+    settings = get_settings()
+
+    # Configure structured logging
+    configure_logging(log_level=settings.log_level, log_format=settings.log_format)
+    logger = get_logger(__name__)
+    logger.info(
+        "Starting Control Plane",
+        extra={"version": settings.api_version, "log_format": settings.log_format},
+    )
+
+    app = FastAPI(
+        title=settings.project_name,
+        version=settings.api_version,
+        openapi_tags=tags_metadata,
+        description="""
+## Relay Control Plane API
+
+Self-hosted control plane for managing document collaboration and sharing via Relay.
+
+### Features
+
+* **Authentication** - JWT-based authentication with login/logout
+* **User Management** - Admin endpoints for user CRUD operations
+* **Share Management** - Create and manage document/folder shares with visibility controls
+* **Access Control** - Role-based permissions (owner, editor, viewer)
+* **Token Issuance** - Generate relay tokens for secure document access
+* **Audit Logging** - Comprehensive activity tracking
+* **Dashboard** - Statistics and insights for admins and users
+* **Rate Limiting** - Protection against abuse (10 login attempts/min, 30 tokens/min)
+* **Health Checks** - Kubernetes-compatible liveness/readiness probes
+
+### Authentication
+
+Most endpoints require authentication via JWT token in the `Authorization` header:
+
+```
+Authorization: Bearer <your-jwt-token>
+```
+
+Get a token by calling `POST /auth/login` with valid credentials.
+        """,
+        contact={
+            "name": "Relay Control Plane",
+            "url": "https://github.com/entire-vc/relay-onprem",
+        },
+        license_info={
+            "name": "Private",
+        },
+    )
+
+    # Add rate limiter state
+    app.state.limiter = limiter
+
+    # Add middlewares (order matters - first added = outermost)
+    app.add_middleware(PrometheusMiddleware)  # Metrics collection
+    app.add_middleware(req_logging.RequestLoggingMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Register exception handlers (order matters - most specific first)
+    # Admin UI auth redirect (must be before generic handlers)
+    async def admin_auth_redirect_handler(request, exc):
+        return RedirectResponse("/admin-ui/login", status_code=302)
+
+    app.add_exception_handler(AdminAuthRedirect, admin_auth_redirect_handler)
+    app.add_exception_handler(StarletteHTTPException, errors.http_exception_handler)
+    app.add_exception_handler(RequestValidationError, errors.validation_exception_handler)
+    # Specific database errors before generic SQLAlchemyError
+    app.add_exception_handler(IntegrityError, errors.integrity_error_handler)
+    app.add_exception_handler(DataError, errors.data_error_handler)
+    app.add_exception_handler(OperationalError, errors.operational_error_handler)
+    app.add_exception_handler(SQLAlchemyError, errors.database_exception_handler)
+    app.add_exception_handler(Exception, errors.general_exception_handler)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    # Mount static files for admin UI
+    app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+    # Prometheus metrics endpoint (no auth, no versioning)
+    app.include_router(metrics.router)
+
+    # Register v1 API routers
+    app.include_router(health.router, prefix="/v1")
+    app.include_router(server.router, prefix="/v1")
+    app.include_router(auth.router, prefix="/v1")
+    app.include_router(oauth.router, prefix="/v1")  # OAuth/OIDC authentication
+    app.include_router(users.router, prefix="/v1")
+    app.include_router(admin.router, prefix="/v1")
+    app.include_router(admin_ui.router, prefix="/v1")  # Admin web UI
+    app.include_router(dashboard.router, prefix="/v1")
+    app.include_router(shares.router, prefix="/v1")
+    app.include_router(invites.router, prefix="/v1")  # Share invite management (authenticated)
+    app.include_router(invites.public_router, prefix="/v1")  # Public invite redemption
+    app.include_router(tokens.router, prefix="/v1")
+    app.include_router(keys.router, prefix="/v1")
+    app.include_router(web.router)  # Web publishing public API (prefix included)
+    app.include_router(published_links.router, prefix="/v1")  # Published links CRUD
+    app.include_router(comments.router, prefix="/v1")  # Comments API
+    app.include_router(webhooks.router)  # Webhooks API (prefix included)
+    app.include_router(webhooks.admin_router)  # Admin webhooks API (prefix included)
+
+    # Legacy routes (backward compatibility) - proxy to /v1 with deprecation warning
+    app.include_router(health.router, deprecated=True)
+    app.include_router(server.router, deprecated=True)
+    app.include_router(auth.router, deprecated=True)
+    app.include_router(oauth.router, deprecated=True)  # OAuth also available without /v1
+    app.include_router(users.router, deprecated=True)
+    app.include_router(admin.router, deprecated=True)
+    app.include_router(admin_ui.router, deprecated=True)
+    app.include_router(dashboard.router, deprecated=True)
+    app.include_router(shares.router, deprecated=True)
+    app.include_router(invites.router, deprecated=True)
+    app.include_router(invites.public_router, deprecated=True)
+    app.include_router(tokens.router, deprecated=True)
+    app.include_router(keys.router, deprecated=True)
+
+    # ─── /.well-known/relay.md/license (plugin license validation) ───────────
+    @app.get("/.well-known/relay.md/license", tags=["meta"])
+    async def issue_relay_license(request: Request):
+        rsa_private_key = getattr(request.app.state, "license_rsa_private_key", None)
+        if rsa_private_key is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="License key not loaded",
+            )
+
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+        proto = request.headers.get("x-forwarded-proto", "https")
+        base = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+
+        now = datetime.now(tz=timezone.utc)
+        payload = {
+            "iss": "https://auth.system3.md",
+            "sub": "endpoint-certificate",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(days=365)).timestamp()),
+            "apiUrl": base,
+            "authUrl": base,
+            "customer": "self-hosted",
+        }
+        token = pyjwt.encode(payload, rsa_private_key, algorithm="RS256")
+        return JSONResponse(content={"licenses": [{"license": token}]})
+
+    # ─── /file-token endpoint (relay.md plugin compatibility) ────────────────
+    @app.post("/file-token", tags=["tokens"])
+    async def issue_file_token(
+        request: Request,
+        payload: FileTokenRequest,
+    ) -> FileTokenResponse:
+        cfg = get_settings()
+
+        auth_header = request.headers.get("Authorization", "")
+        scheme, _, token_str = auth_header.partition(" ")
+        if scheme.lower() != "bearer" or not token_str:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid Authorization header",
+            )
+        try:
+            token_payload = security.decode_access_token(token_str)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid access token",
+            )
+
+        private_key = request.app.state.relay_private_key
+        key_id = request.app.state.relay_key_id
+        relay_url = str(cfg.relay_public_url).rstrip("/")
+
+        http_relay_url = relay_url.replace("wss://", "https://").replace("ws://", "http://")
+
+        _s3rn_match = _re.search(r":file:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", payload.docId, _re.IGNORECASE)
+        file_doc_id = _s3rn_match.group(1) if _s3rn_match else payload.docId
+
+        file_token = security.create_file_token_cwt(
+            private_key=private_key,
+            key_id=key_id,
+            file_hash=payload.hash,
+            doc_id=file_doc_id,
+            mode="write",
+            expires_minutes=cfg.relay_token_ttl_minutes,
+            audience=relay_url,
+        )
+
+        base_url = f"{http_relay_url}/f/{file_doc_id}"
+
+        return FileTokenResponse(
+            baseUrl=base_url,
+            token=file_token,
+            docId=payload.docId,
+        )
+
+    @app.on_event("startup")
+    def _bootstrap_admin() -> None:
+        session_maker = get_sessionmaker()
+        session = session_maker()
+        try:
+            auth_service.bootstrap_admin_if_needed(session)
+        finally:
+            session.close()
+
+    @app.on_event("startup")
+    def _validate_oauth_config() -> None:
+        """Validate OAuth configuration on startup."""
+        settings = get_settings()
+        if settings.oauth_enabled:
+            errs = []
+            if not settings.oauth_issuer_url:
+                errs.append("OAUTH_ISSUER_URL is required when OAuth is enabled")
+            if not settings.oauth_client_id:
+                errs.append("OAUTH_CLIENT_ID is required when OAuth is enabled")
+            if not settings.oauth_client_secret:
+                errs.append("OAUTH_CLIENT_SECRET is required when OAuth is enabled")
+            if settings.oauth_default_role not in ("user", "admin"):
+                errs.append(
+                    f"OAUTH_DEFAULT_ROLE must be 'user' or 'admin', "
+                    f"got '{settings.oauth_default_role}'"
+                )
+            if errs:
+                error_msg = "OAuth configuration errors:\n  - " + "\n  - ".join(errs)
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            logger.info(
+                "OAuth enabled: provider=%s, issuer=%s, scopes=%s, auto_register=%s, "
+                "admin_groups=%s",
+                settings.oauth_provider_name,
+                settings.oauth_issuer_url,
+                settings.oauth_scopes,
+                settings.oauth_auto_register,
+                settings.oauth_admin_groups,
+            )
+
+    @app.on_event("startup")
+    def _bootstrap_relay_keys() -> None:
+        """Load or generate Ed25519 keypair for relay token signing."""
+        settings = get_settings()
+        private_key, public_key, key_id = security.load_or_generate_relay_keypair(settings)
+        app.state.relay_private_key = private_key
+        app.state.relay_public_key = public_key
+        app.state.relay_key_id = key_id
+
+    @app.on_event("startup")
+    def _load_license_rsa_key() -> None:
+        """Load RSA private key for /.well-known/relay.md/license JWT signing."""
+        key_path = os.environ.get(
+            "LICENSE_RSA_PRIVATE_KEY_PATH",
+            "/keys/relay_license_rsa_private.pem",
+        )
+        if not os.path.exists(key_path):
+            logger.warning("License RSA key not found at %s — license endpoint disabled", key_path)
+            app.state.license_rsa_private_key = None
+            return
+        with open(key_path, "rb") as f:
+            pem_data = f.read()
+        priv = serialization.load_pem_private_key(pem_data, password=None)
+        app.state.license_rsa_private_key = priv
+        logger.info("License RSA key loaded from %s", key_path)
+
+    return app
+
+
+app = build_app()

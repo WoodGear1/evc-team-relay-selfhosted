@@ -1,0 +1,78 @@
+name: Release Plugin Prerelease
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check if tag is a prerelease tag
+        id: check
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          MANIFEST_VERSION=$(jq -r .version apps/plugin/manifest.json)
+          if [ "$TAG" = "$MANIFEST_VERSION" ]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/plugin/package-lock.json
+      - run: npm ci
+        working-directory: apps/plugin
+      - run: npm run beta
+        working-directory: apps/plugin
+      - name: Build prerelease notes
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          cat <<EOF > release-metadata.md
+          ## Summary
+
+          - Prerelease plugin assets from \`apps/plugin\`
+          - Prerelease-compatible images for \`ghcr.io/woodgear1/evc-team-relay-selfhosted\`
+
+          ## Docker Images
+
+          \`\`\`bash
+          docker pull ghcr.io/woodgear1/evc-team-relay-selfhosted/control-plane:${TAG}
+          docker pull ghcr.io/woodgear1/evc-team-relay-selfhosted/web-publish:${TAG}
+          docker pull ghcr.io/woodgear1/evc-team-relay-selfhosted/relay-server:${TAG}
+          \`\`\`
+
+          ## Deploy Docs
+
+          - \`README.md\`
+          - \`TRUENAS_GIT_DEPLOY_GUIDE.md\`
+          - \`docs/server/installation.md\`
+          EOF
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-metadata.md
+          prerelease: true
+          draft: false
+          fail_on_unmatched_files: true
+          files: |
+            apps/plugin/main.js
+            apps/plugin/styles.css
+            apps/plugin/manifest.json
+            apps/plugin/manifest-beta.json
+            apps/plugin/versions.json
+            release-metadata.md

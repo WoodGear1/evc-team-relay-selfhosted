@@ -1,0 +1,10 @@
+api
+core
+db
+middleware
+schemas
+services
+static
+templates
+utils
+workers

@@ -1,0 +1,30 @@
+services:
+  control-plane:
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/patches/admin_ui.py:/app/app/api/routers/admin_ui.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/token_service.py:/app/app/services/token_service.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/security.py:/app/app/core/security.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/tokens.py:/app/app/api/routers/tokens.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/main.py:/app/app/main.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/models.py:/app/app/db/models.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/web.py:/app/app/api/routers/web.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/routers/published_links.py:/app/app/api/routers/published_links.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/routers/comments.py:/app/app/api/routers/comments.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/services/published_link_service.py:/app/app/services/published_link_service.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/services/comment_service.py:/app/app/services/comment_service.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/schemas/published_link.py:/app/app/schemas/published_link.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604020001_add_published_links_comments.py:/app/app/db/migrations/versions/202604020001_add_published_links_comments.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604020002_backfill_published_links.py:/app/app/db/migrations/versions/202604020002_backfill_published_links.py:ro
+
+  control-plane-migrate:
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/patches/models.py:/app/app/db/models.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/schemas/published_link.py:/app/app/schemas/published_link.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604020001_add_published_links_comments.py:/app/app/db/migrations/versions/202604020001_add_published_links_comments.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604020002_backfill_published_links.py:/app/app/db/migrations/versions/202604020002_backfill_published_links.py:ro
+
+  web-publish:
+    image: !reset null
+    build:
+      context: ..
+      dockerfile: ./apps/web-publish/Dockerfile

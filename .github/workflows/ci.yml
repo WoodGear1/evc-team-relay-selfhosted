@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      plugin: ${{ steps.filter.outputs.plugin }}
+      web: ${{ steps.filter.outputs.web }}
+      control_plane: ${{ steps.filter.outputs.control_plane }}
+      deploy_contract: ${{ steps.filter.outputs.deploy_contract }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            plugin:
+              - 'apps/plugin/**'
+              - 'packages/**'
+            web:
+              - 'apps/web-publish/**'
+              - 'packages/**'
+            control_plane:
+              - 'apps/control-plane/**'
+            deploy_contract:
+              - 'infra/**'
+              - 'deploy/**'
+              - 'apps/control-plane/**'
+              - 'apps/web-publish/**'
+              - 'apps/relay-server/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.npmrc'
+              - '.dockerignore'
+              - '.github/workflows/**'
+
+  plugin:
+    needs: changes
+    if: needs.changes.outputs.plugin == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/plugin/package-lock.json
+      - run: npm ci
+        working-directory: apps/plugin
+      - run: npm run build
+        working-directory: apps/plugin
+      - run: npm test
+        working-directory: apps/plugin
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install --legacy-peer-deps
+      - run: npm run check:web
+      - run: npm run build:web
+
+  control-plane:
+    needs: changes
+    if: needs.changes.outputs.control_plane == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[test]"
+        working-directory: apps/control-plane
+      - run: python -m pytest
+        working-directory: apps/control-plane
+
+  deploy-contract:
+    needs: changes
+    if: needs.changes.outputs.deploy_contract == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install --legacy-peer-deps
+      - name: Validate base compose
+        run: docker compose -f infra/docker-compose.yml config
+      - name: Validate image-first compose
+        run: docker compose -f infra/docker-compose.yml -f deploy/docker-compose.override.yml config
+      - name: Validate fallback compose
+        run: docker compose -f infra/docker-compose.yml -f deploy/docker-compose.override.yml -f deploy/docker-compose.fallback.yml config
+      - name: Smoke build control-plane image
+        run: docker build -t evc-smoke/control-plane:ci apps/control-plane
+      - name: Smoke build web-publish image
+        run: docker build -t evc-smoke/web-publish:ci -f apps/web-publish/Dockerfile .
+      - name: Smoke build relay-server image
+        run: docker build -t evc-smoke/relay-server:ci apps/relay-server
