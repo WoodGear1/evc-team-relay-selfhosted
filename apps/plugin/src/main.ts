@@ -1093,29 +1093,52 @@ export default class Live extends Plugin {
 								});
 							}
 						}
-						if (folder.relayId && folder.connected) {
+						if (folder.guid && folder.settings?.onpremServerId && this.shareClientManager) {
 							menu.addItem((item) => {
 								item
 									.setTitle("Relay: sync")
 									.setIcon("folder-sync")
 									.onClick(async () => {
-										void folder.netSync();
-										// Also update web_folder_items if share is web-published
-										if (this.webSyncManager && this.shareClientManager && folder.guid) {
-											try {
-												const serverId = folder.settings?.onpremServerId;
-												if (serverId) {
-													const share = await this.shareClientManager.getShare(serverId, folder.guid);
-													if (share?.web_published) {
-														await this.webSyncManager.syncFolderStructureToWeb(
-															folder.path, serverId, folder.guid
-														);
-													}
-												}
-											} catch {
-												// Web sync is best-effort, don't block CRDT sync
+										console.log("[Relay:sync] clicked, folder:", folder.path, "guid:", folder.guid, "serverId:", folder.settings?.onpremServerId);
+										const syncNotice = new Notice("Syncing...", 0);
+										try {
+											// 1. Fire CRDT sync (non-blocking)
+											if (folder.relayId && folder.connected) {
+												console.log("[Relay:sync] starting CRDT sync");
+												void folder.netSync();
 											}
+
+											// 2. Push web content from disk
+											console.log("[Relay:sync] starting web content sync");
+											await this.ensureWebSyncManager();
+											const stats = await this.webSyncManager!.syncAllFolderContent(
+												folder.path, folder.settings!.onpremServerId!, folder.guid!
+											);
+											syncNotice.hide();
+
+											const mb = (stats.bytesUploaded / 1024 / 1024).toFixed(2);
+											const lines = [`Sync complete`];
+											lines.push(`Files: ${stats.totalFiles} total`);
+											lines.push(`Uploaded: ${stats.synced} (${mb} MB)`);
+											if (stats.skipped > 0) lines.push(`Skipped: ${stats.skipped}`);
+											if (stats.failed > 0) lines.push(`Failed: ${stats.failed}`);
+											console.log("[Relay:sync] done:", JSON.stringify(stats));
+											new Notice(lines.join("\n"), 8000);
+										} catch (e: unknown) {
+											syncNotice.hide();
+											console.error("[Relay:sync] error:", e);
+											new Notice(`Sync failed: ${e instanceof Error ? e.message : String(e)}`, 6000);
 										}
+									});
+							});
+						} else if (folder.relayId && folder.connected) {
+							menu.addItem((item) => {
+								item
+									.setTitle("Relay: sync")
+									.setIcon("folder-sync")
+									.onClick(() => {
+										void folder.netSync();
+										new Notice("CRDT sync started", 3000);
 									});
 							});
 						}
@@ -1464,6 +1487,13 @@ export default class Live extends Plugin {
 	/**
 	 * Sync all web-published shares
 	 */
+	private async ensureWebSyncManager(): Promise<void> {
+		if (!this.webSyncManager && this.shareClientManager) {
+			const { WebSyncManager } = await import("./WebSyncManager");
+			this.webSyncManager = new WebSyncManager(this.vault, this.shareClientManager);
+		}
+	}
+
 	private async syncAllShares() {
 		const startedAt = performance.now();
 		if (!this.shareClientManager) {
@@ -1472,8 +1502,9 @@ export default class Live extends Plugin {
 		}
 
 		try {
-			new Notice("Syncing all shares...");
+			const syncNotice = new Notice("Syncing all shares...", 0);
 			const shares = await this.shareClientManager.getAllSharesFlat();
+			console.log("[Relay:syncAll] shares:", shares.length, "web_published:", shares.filter(s => s.web_published).length);
 
 			// 1. Reconnect CRDT relay for all folder shares
 			let relaySynced = 0;
@@ -1489,6 +1520,8 @@ export default class Live extends Plugin {
 
 			// 2. Sync web-published shares
 			let webSynced = 0;
+			let webFailed = 0;
+			let bytesUploaded = 0;
 			const webShares = shares.filter(s => s.web_published);
 			for (const share of webShares) {
 				try {
@@ -1499,52 +1532,56 @@ export default class Live extends Plugin {
 							await this.shareClientManager.updateShare(share.serverId, share.id, {
 								web_content: content,
 							});
+							bytesUploaded += new Blob([content]).size;
 							webSynced++;
 						}
 					} else if (share.kind === "folder") {
 						const folderAbs = this.vault.getAbstractFileByPath(share.path);
 						if (folderAbs instanceof TFolder) {
-							// 1. Build recursive folder items and PATCH structure
 							const items = this.getFolderItemsRecursive(folderAbs);
 							await this.shareClientManager.updateShare(share.serverId, share.id, {
 								web_folder_items: items,
 							});
-							// 2. POST content for each doc/canvas
 							if (share.web_slug) {
-								for (const item of items) {
-									if (item.type === "doc" || item.type === "canvas") {
-										try {
-											const filePath = `${share.path}/${item.path}`;
-											const f = this.vault.getAbstractFileByPath(filePath);
-											if (f instanceof TFile) {
-												const content = await this.vault.read(f);
-												await this.shareClientManager.syncFolderFileContent(
-													share.serverId, share.web_slug, item.path, content
-												);
-												webSynced++;
-											}
-										} catch { /* skip individual file errors */ }
+								const docItems = items.filter(i => i.type === "doc" || i.type === "canvas");
+								syncNotice.setMessage(`Syncing web: ${share.path} (${docItems.length} files)...`);
+								for (const item of docItems) {
+									try {
+										const filePath = `${share.path}/${item.path}`;
+										const f = this.vault.getAbstractFileByPath(filePath);
+										if (f instanceof TFile) {
+											const content = await this.vault.read(f);
+											await this.shareClientManager.syncFolderFileContent(
+												share.serverId, share.web_slug, item.path, content
+											);
+											bytesUploaded += new Blob([content]).size;
+											webSynced++;
+										}
+									} catch (fileErr: unknown) {
+										webFailed++;
+										console.error(`[Relay] Failed to sync file ${item.path}:`, fileErr);
 									}
 								}
 							}
 						}
 					}
 				} catch (e: unknown) {
-					console.error(`Failed to sync ${share.path}:`, e);
+					console.error(`[Relay] Failed to sync share ${share.path}:`, e);
 				}
 			}
 
-			const parts = [];
-			if (relaySynced > 0) parts.push(`${relaySynced} relay`);
-			if (webSynced > 0) parts.push(`${webSynced} web`);
+			syncNotice.hide();
+			const mb = (bytesUploaded / 1024 / 1024).toFixed(2);
+			const lines = [`Sync complete`];
+			if (relaySynced > 0) lines.push(`CRDT: ${relaySynced} relays`);
+			if (webSynced > 0) lines.push(`Web: ${webSynced} files (${mb} MB)`);
+			if (webFailed > 0) lines.push(`Failed: ${webFailed} files`);
 			const elapsed = ((performance.now() - startedAt) / 1000).toFixed(1);
-			new Notice(
-				parts.length > 0
-					? `Sync complete: ${parts.join(", ")} in ${elapsed}s`
-					: `Sync complete: no shares needed syncing (${elapsed}s)`,
-			);
+			lines.push(`Time: ${elapsed}s`);
+			new Notice(lines.join("\n"), 8000);
 		} catch (error: unknown) {
-			new Notice(`Sync failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+			console.error("[Relay] syncAllShares error:", error);
+			new Notice(`Sync failed: ${error instanceof Error ? error.message : "Unknown error"}`, 6000);
 		}
 	}
 

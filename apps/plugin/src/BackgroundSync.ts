@@ -93,7 +93,7 @@ export class BackgroundSync extends HasLogging {
 		private loginManager: LoginManager,
 		private timeProvider: TimeProvider,
 		private sharedFolders: SharedFolders,
-		private concurrency: number = 3,
+		private concurrency: number = 2,
 	) {
 		super();
 		RelayInstances.set(this, "BackgroundSync");
@@ -271,10 +271,10 @@ export class BackgroundSync extends HasLogging {
 						this.activeSync.delete(item);
 						this.inProgressSyncs.delete(item.guid);
 
-						// Unwind the call stack before checking for more work
+						// Stagger next sync to reduce WS connection churn
 						this.timeProvider.setTimeout(() => {
 							void this.processSyncQueue();
-						}, 0);
+						}, 300);
 					});
 			} catch (error: unknown) {
 				item.status = "failed";
@@ -830,7 +830,11 @@ export class BackgroundSync extends HasLogging {
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 		}
 
-		// promise can take some time
+		// Allow the WS handshake to fully complete before closing.
+		// Without this, rapid connect-disconnect causes "WebSocket is closed
+		// before the connection is established" browser warnings.
+		await new Promise((resolve) => setTimeout(resolve, 300));
+
 		if (intent === "disconnected" && !doc.userLock) {
 			doc.disconnect();
 			doc.sharedFolder.tokenStore.removeFromRefreshQueue(S3RN.encode(doc.s3rn));

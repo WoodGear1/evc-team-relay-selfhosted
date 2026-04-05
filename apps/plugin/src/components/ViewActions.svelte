@@ -40,7 +40,7 @@ export let changedRemotely: boolean = false;
 	<button
 		class="clickable-icon view-action system3-view-action {view.tracking
 			? 'notebook-synced'
-			: 'notebook'}"
+			: 'notebook'} {changedRemotely ? 'changed-remotely' : ''}"
 		aria-label={view.tracking
 			? "Tracking changes: local file and update log are in sync"
 			: "Not tracking changes: local file and update log are not in sync"}

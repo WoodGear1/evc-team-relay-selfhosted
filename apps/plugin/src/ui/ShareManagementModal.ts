@@ -729,8 +729,8 @@ export class ShareManagementModal extends Modal {
 								}
 							});
 					});
-			} else {
-				new Setting(contentEl)
+		} else {
+			new Setting(contentEl)
 					.setName("Web URL")
 					.setDesc("URL will be available after the initial publish sync.")
 					.addButton((button) => {
@@ -742,38 +742,30 @@ export class ShareManagementModal extends Modal {
 									await this.syncWebContent();
 								} else {
 									await this.syncFolderItems();
+									await this.syncWebContent();
 								}
 								this.renderContent();
 							});
 					});
 			}
 
-			// Sync button (different for doc vs folder shares)
-			if (this.selectedShare.kind === "doc") {
-				new Setting(contentEl)
-					.setName("Sync content")
-					.setDesc("Update the web page with the latest document content")
-					.addButton((button) => {
-						button
-							.setButtonText("Sync now")
-							.setCta()
-							.onClick(async () => {
-								await this.syncWebContent();
-							});
-					});
-			} else if (this.selectedShare.kind === "folder") {
-				new Setting(contentEl)
-					.setName("Sync folder")
-					.setDesc("Update the web page with the latest folder listing")
-					.addButton((button) => {
-						button
-							.setButtonText("Sync now")
-							.setCta()
-							.onClick(async () => {
+			// Sync button (always syncs both structure + content for folders)
+			new Setting(contentEl)
+				.setName("Sync content")
+				.setDesc(this.selectedShare.kind === "folder"
+					? "Update the web page with the latest folder structure and file content"
+					: "Update the web page with the latest document content")
+				.addButton((button) => {
+					button
+						.setButtonText("Sync now")
+						.setCta()
+						.onClick(async () => {
+							if (this.selectedShare?.kind === "folder") {
 								await this.syncFolderItems();
-							});
-					});
-			}
+							}
+							await this.syncWebContent();
+						});
+				});
 
 			// Search engine indexing toggle
 			const noindex = this.selectedShare.web_noindex ?? true;
@@ -964,27 +956,55 @@ export class ShareManagementModal extends Modal {
 	 * Sync document content to web publishing
 	 */
 	private async syncWebContent() {
-		if (!this.selectedShare || this.selectedShare.kind !== "doc") return;
+		if (!this.selectedShare) return;
 
 		try {
-			const content = await this.getDocumentContent(this.selectedShare.path);
-			if (!content) {
-				new Notice("Could not read document content");
+			if (this.selectedShare.kind === "doc") {
+				const content = await this.getDocumentContent(this.selectedShare.path);
+				if (!content) {
+					new Notice("Could not read document content");
+					return;
+				}
+
+				let updatedShare;
+
+				if (this.plugin.shareClientManager) {
+					updatedShare = await this.plugin.shareClientManager.updateShare(
+						this.selectedShare.serverId,
+						this.selectedShare.id,
+						{ web_content: content }
+					);
+				} else if (this.plugin.shareClient) {
+					updatedShare = await this.plugin.shareClient.updateShare(
+						this.selectedShare.id,
+						{ web_content: content }
+					);
+				} else {
+					throw new Error("No share client available");
+				}
+
+				await this.refreshSelectedShare(updatedShare);
+				new Notice("Web content synced successfully!");
+				return;
+			}
+
+			const items = this.getFolderItems(this.selectedShare.path);
+			if (items.length === 0) {
+				new Notice("Folder is empty");
 				return;
 			}
 
 			let updatedShare;
-
 			if (this.plugin.shareClientManager) {
 				updatedShare = await this.plugin.shareClientManager.updateShare(
 					this.selectedShare.serverId,
 					this.selectedShare.id,
-					{ web_content: content }
+					{ web_folder_items: items }
 				);
 			} else if (this.plugin.shareClient) {
 				updatedShare = await this.plugin.shareClient.updateShare(
 					this.selectedShare.id,
-					{ web_content: content }
+					{ web_folder_items: items }
 				);
 			} else {
 				throw new Error("No share client available");
@@ -992,7 +1012,31 @@ export class ShareManagementModal extends Modal {
 
 			await this.refreshSelectedShare(updatedShare);
 
-			new Notice("Web content synced successfully!");
+			const slug = updatedShare?.web_slug || this.selectedShare.web_slug;
+			if (!slug) {
+				new Notice("Folder structure synced, but web slug is missing for content sync");
+				return;
+			}
+
+			let synced = 0;
+			for (const item of items) {
+				if (item.type !== "doc") continue;
+				const content = await this.getDocumentContent(`${this.selectedShare.path}/${item.path}`);
+				if (!content) continue;
+				if (this.plugin.shareClientManager) {
+					await this.plugin.shareClientManager.syncFolderFileContent(
+						this.selectedShare.serverId,
+						slug,
+						item.path,
+						content
+					);
+				} else if (this.plugin.shareClient) {
+					await this.plugin.shareClient.syncFolderFileContent(slug, item.path, content);
+				}
+				synced += 1;
+			}
+
+			new Notice(`Web folder synced successfully! (${synced} files)`);
 		} catch (error: unknown) {
 			new Notice(
 				`Failed to sync content: ${error instanceof Error ? error.message : "Unknown error"}`
@@ -1131,6 +1175,9 @@ export class ShareManagementModal extends Modal {
 				...updatedShare,
 				web_published: updatedShare?.web_published ?? enabled,
 			});
+			if (enabled && this.selectedShare.kind === "folder") {
+				await this.syncWebContent();
+			}
 
 			new Notice(enabled ? "Share published to web!" : "Share unpublished from web");
 			this.renderContent();

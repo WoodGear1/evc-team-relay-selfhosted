@@ -387,43 +387,51 @@ export class LiveCMPluginValue implements PluginValue {
 	}
 
 	async resync() {
-		if (isLiveMd(this.view) && !this.view.tracking && !this.destroyed) {
-			await this.view.document.whenSynced();
-			await this.waitForProviderSync();
-			// Guard: if relay returned empty content but the editor has text,
-			// upload the editor content to Y.Text instead of wiping the editor.
-			// This prevents data loss when opening a file before background sync
-			// has uploaded its content to a newly created share.
-			if (this.view.document.text === "" && this.editor.state.doc.length > 0) {
-				const editorContent = this.editor.state.doc.toString();
-				this.warn("[resync] relay is empty but editor has content — uploading to Y.Text");
-				this.view.document.ydoc.getText("contents").insert(0, editorContent);
-				this.view.tracking = true;
-				return;
-			}
-			const keyFrame = await this.getKeyFrame();
+		try {
 			if (isLiveMd(this.view) && !this.view.tracking && !this.destroyed) {
-				this.editor.dispatch({
-					changes: keyFrame,
-					annotations: [ySyncAnnotation.of(this.editor)],
-				});
+				const viewDoc = this.view?.document;
+				if (!viewDoc) return;
+				await viewDoc.whenSynced();
+				if (this.destroyed || !this.view || !this.editor) return;
+				await this.waitForProviderSync();
+				if (this.destroyed || !isLiveMd(this.view) || !this.view?.document || !this.editor) return;
+				if (this.view.document.text === "" && this.editor.state.doc.length > 0) {
+					const editorContent = this.editor.state.doc.toString();
+					this.warn("[resync] relay is empty but editor has content — uploading to Y.Text");
+					this.view.document.ydoc.getText("contents").insert(0, editorContent);
+					this.view.tracking = true;
+					return;
+				}
+				const keyFrame = await this.getKeyFrame();
+				if (isLiveMd(this.view) && !this.view.tracking && !this.destroyed && this.editor) {
+					this.editor.dispatch({
+						changes: keyFrame,
+						annotations: [ySyncAnnotation.of(this.editor)],
+					});
+				}
+			} else if (this.active(this.view) && this.document) {
+				const doc = this.document;
+				await doc.whenSynced();
+				if (this.destroyed || !this.editor) return;
+				await this.waitForProviderSync();
+				if (this.destroyed || !this.document || !this.editor) return;
+				if (this.document.text === "" && this.editor.state.doc.length > 0) {
+					const editorContent = this.editor.state.doc.toString();
+					this.warn("[resync] relay is empty but editor has content — uploading to Y.Text");
+					this.document.ydoc.getText("contents").insert(0, editorContent);
+					return;
+				}
+				const keyFrame = await this.getKeyFrame();
+				if (this.active(this.view) && !this.destroyed && this.editor) {
+					this.editor.dispatch({
+						changes: keyFrame,
+						annotations: [ySyncAnnotation.of(this.editor)],
+					});
+				}
 			}
-		} else if (this.active(this.view) && this.document) {
-			await this.document.whenSynced();
-			await this.waitForProviderSync();
-			// Same guard for embedded/SharedFolder documents
-			if (this.document.text === "" && this.editor.state.doc.length > 0) {
-				const editorContent = this.editor.state.doc.toString();
-				this.warn("[resync] relay is empty but editor has content — uploading to Y.Text");
-				this.document.ydoc.getText("contents").insert(0, editorContent);
-				return;
-			}
-			const keyFrame = await this.getKeyFrame();
-			if (this.active(this.view) && !this.destroyed) {
-				this.editor.dispatch({
-					changes: keyFrame,
-					annotations: [ySyncAnnotation.of(this.editor)],
-				});
+		} catch (e: unknown) {
+			if (!this.destroyed) {
+				this.warn("[resync] error:", (e as Error).message);
 			}
 		}
 	}
@@ -455,20 +463,18 @@ export class LiveCMPluginValue implements PluginValue {
 	}
 
 	async getKeyFrame(incremental = false): Promise<ChangeSpec[]> {
-		// goal: sync editor state to ytext state so we can accept delta edits.
-		if (!this.active(this.view) || this.destroyed) {
+		if (!this.active(this.view) || this.destroyed || !this.editor) {
 			return [];
 		}
 
 		if (this.document?.text === this.editor.state.doc.toString()) {
-			// disk and ytext were already the same.
 			if (isLiveMd(this.view)) {
 				this.view.tracking = true;
 			}
 			return [];
 		} else if (flags().enableDeltaLogging) {
 			this.warn(
-				`|${this.document?.text}|\n|${this.editor.state.doc.toString()}|`,
+				`|${this.document?.text}|\n|${this.editor?.state.doc.toString()}|`,
 			);
 		}
 
@@ -483,8 +489,7 @@ export class LiveCMPluginValue implements PluginValue {
 			return [];
 		}
 
-		// disk and ytext differ
-		if (isLiveMd(this.view) && !this.view.tracking) {
+		if (isLiveMd(this.view) && this.view && !this.view.tracking) {
 			void this.view.checkStale();
 		} else if (this.document) {
 			try {
@@ -497,7 +502,7 @@ export class LiveCMPluginValue implements PluginValue {
 			}
 		}
 
-		if (this.active(this.view) && !this.destroyed) {
+		if (this.active(this.view) && !this.destroyed && this.document && this.editor) {
 			return [this.getBufferChange(this.document.text, incremental)];
 		}
 		return [];
@@ -515,6 +520,7 @@ export class LiveCMPluginValue implements PluginValue {
 		}
 		this.document = this.getDocument();
 		this.document?.markLocalEdit();
+		this.document?.markEditingActivity();
 		const ytext = this.document?.ytext;
 		if (!ytext) {
 			return;

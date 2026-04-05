@@ -402,6 +402,94 @@ export class WebSyncManager {
 	}
 
 	/**
+	 * Full content sync for an entire folder share.
+	 * Pushes structure + all md file contents to web API and returns statistics.
+	 */
+	async syncAllFolderContent(
+		folderPath: string,
+		serverId: string,
+		shareId: string,
+	): Promise<{
+		totalFiles: number;
+		synced: number;
+		failed: number;
+		skipped: number;
+		bytesUploaded: number;
+		failedPaths: string[];
+	}> {
+		const stats = {
+			totalFiles: 0,
+			synced: 0,
+			failed: 0,
+			skipped: 0,
+			bytesUploaded: 0,
+			failedPaths: [] as string[],
+		};
+
+		const client = this.clientManager.getClient(serverId);
+		if (!client) {
+			log("syncAllFolderContent: client not found", { serverId });
+			return stats;
+		}
+
+		const share = await client.getShare(shareId);
+		if (!share?.web_slug) {
+			log("syncAllFolderContent: no web_slug", { shareId });
+			return stats;
+		}
+
+		const items = this.getFolderItems(folderPath);
+		stats.totalFiles = items.filter((i) => i.type === "doc").length;
+
+		// Push structure first
+		try {
+			await this.clientManager.updateShare(serverId, shareId, {
+				web_folder_items: items,
+			});
+		} catch (e: unknown) {
+			log("syncAllFolderContent: failed to push structure", {
+				error: e instanceof Error ? e.message : String(e),
+			});
+		}
+
+		// Push content for each md file
+		for (const item of items) {
+			if (item.type !== "doc") continue;
+
+			const filePath = `${folderPath}/${item.path}`;
+			const file = this.vault.getAbstractFileByPath(filePath);
+			if (!file || !(file instanceof TFile)) {
+				stats.skipped++;
+				continue;
+			}
+
+			try {
+				const content = await this.vault.read(file);
+				if (!content) {
+					stats.skipped++;
+					continue;
+				}
+
+				await this.clientManager.syncFolderFileContent(
+					serverId,
+					share.web_slug,
+					item.path,
+					content,
+				);
+				stats.synced++;
+				stats.bytesUploaded += new Blob([content]).size;
+			} catch (e: unknown) {
+				stats.failed++;
+				stats.failedPaths.push(item.path);
+				console.error("[Relay:sync] file failed:", item.path, e instanceof Error ? e.message : String(e));
+			}
+		}
+
+		log("syncAllFolderContent: done", stats);
+		return stats;
+	}
+
+	/**
 	 * Get all registered auto-sync paths
 	 */
 	getAutoSyncPaths(): string[] {

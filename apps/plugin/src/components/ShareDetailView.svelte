@@ -453,6 +453,9 @@
 					web_published: updated.web_published ?? enabled,
 				});
 			}
+			if (enabled && currentShare.kind === "folder") {
+				await syncWebContent();
+			}
 			new Notice(enabled ? "Published to web!" : "Unpublished from web");
 		} catch (e: unknown) {
 			if (e instanceof LimitExceededApiError) {
