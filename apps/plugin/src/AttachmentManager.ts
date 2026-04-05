@@ -18,7 +18,7 @@ const IMAGE_EXTENSIONS = new Set([
 ]);
 
 export class AttachmentManager {
-	private readonly managedFolder = "img";
+	private readonly defaultManagedFolder = "img";
 	private readonly pendingManagedPaths = new Set<string>();
 	private readonly noteReferenceSnapshots = new Map<string, Set<string>>();
 	private readonly cleanupTimers = new Map<string, number>();
@@ -35,22 +35,27 @@ export class AttachmentManager {
 	}
 
 	isManagedAsset(path: string): boolean {
-		return path.startsWith(`${this.managedFolder}/`) && this.state.isManagedAttachment(path);
+		return this.state.isManagedAttachment(normalizePath(path));
 	}
 
-	async ensureManagedFolder(): Promise<TFolder> {
-		const existing = this.vault.getAbstractFileByPath(this.managedFolder);
+	async ensureManagedFolder(folderPath: string = this.defaultManagedFolder): Promise<TFolder> {
+		const normalizedFolderPath = normalizePath(folderPath);
+		const existing = this.vault.getAbstractFileByPath(normalizedFolderPath);
 		if (existing instanceof TFolder) {
 			return existing;
 		}
 		if (existing) {
-			throw new Error(`Cannot create ${this.managedFolder}: path is already used by a file`);
+			throw new Error(`Cannot create ${normalizedFolderPath}: path is already used by a file`);
 		}
-		return this.vault.createFolder(this.managedFolder);
+		return this.vault.createFolder(normalizedFolderPath);
 	}
 
-	async getManagedAttachmentPath(filename: string): Promise<string> {
-		await this.ensureManagedFolder();
+	async getManagedAttachmentPath(
+		filename: string,
+		folderPath: string = this.defaultManagedFolder,
+	): Promise<string> {
+		const normalizedFolderPath = normalizePath(folderPath);
+		await this.ensureManagedFolder(normalizedFolderPath);
 
 		const sanitized = this.sanitizeFilename(filename);
 		const extension = sanitized.split(".").pop() ?? "png";
@@ -59,7 +64,7 @@ export class AttachmentManager {
 
 		while (attempt < 10_000) {
 			const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
-			const candidate = normalizePath(`${this.managedFolder}/${basename}${suffix}.${extension}`);
+			const candidate = normalizePath(`${normalizedFolderPath}/${basename}${suffix}.${extension}`);
 			if (!this.vault.getAbstractFileByPath(candidate)) {
 				return candidate;
 			}

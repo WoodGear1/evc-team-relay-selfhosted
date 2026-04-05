@@ -1102,6 +1102,13 @@ export default class Live extends Plugin {
 										console.log("[Relay:sync] clicked, folder:", folder.path, "guid:", folder.guid, "serverId:", folder.settings?.onpremServerId);
 										const syncNotice = new Notice("Syncing...", 0);
 										try {
+											const migratedEmbeds =
+												await this.migrateManagedAttachmentsForSharedFolder(folder);
+											if (migratedEmbeds > 0) {
+												syncNotice.setMessage(
+													`Syncing... migrated ${migratedEmbeds} attachment links`,
+												);
+											}
 											// 1. Fire CRDT sync (non-blocking)
 											if (folder.relayId && folder.connected) {
 												console.log("[Relay:sync] starting CRDT sync");
@@ -1512,6 +1519,7 @@ export default class Live extends Plugin {
 				if (share.kind === "folder") {
 					const folder = this.sharedFolders.find(sf => sf.guid === share.id);
 					if (folder) {
+						await this.migrateManagedAttachmentsForSharedFolder(folder);
 						void folder.connect();
 						relaySynced++;
 					}
@@ -1661,6 +1669,110 @@ export default class Live extends Plugin {
 		const normalized = normalizePath(path);
 		if (!this.managedAttachmentPaths.delete(normalized)) return;
 		await this.persistPluginDataState();
+	}
+
+	private getManagedAttachmentFolderForSource(sourcePath?: string): string {
+		if (!sourcePath) {
+			return "img";
+		}
+		const sharedFolder = this.sharedFolders.lookup(sourcePath);
+		if (!sharedFolder) {
+			return "img";
+		}
+		return normalizePath(`${sharedFolder.path}/img`);
+	}
+
+	private getRelativeManagedAttachmentPath(sourcePath: string, targetPath: string): string {
+		const sourceDirectory = sourcePath.split("/").slice(0, -1).join("/") || ".";
+		return normalizePath(relative(sourceDirectory, targetPath));
+	}
+
+	private rewriteManagedEmbedLink(
+		original: string,
+		sourcePath: string,
+		targetPath: string,
+	): string {
+		const relativeTargetPath = this.getRelativeManagedAttachmentPath(
+			sourcePath,
+			targetPath,
+		);
+		if (original.startsWith("![[") && original.endsWith("]]")) {
+			const inner = original.slice(3, -2);
+			const aliasIndex = inner.indexOf("|");
+			const aliasSuffix = aliasIndex >= 0 ? inner.slice(aliasIndex) : "";
+			return `![[${relativeTargetPath}${aliasSuffix}]]`;
+		}
+		return original.replace(/\(([^)]+)\)/, `(${relativeTargetPath})`);
+	}
+
+	private async migrateManagedAttachmentsForSharedFolder(
+		sharedFolder: SharedFolder,
+	): Promise<number> {
+		let migratedEmbeds = 0;
+		const markdownFiles = this.vault
+			.getMarkdownFiles()
+			.filter((file) => sharedFolder.checkPath(file.path));
+
+		for (const note of markdownFiles) {
+			const cache = this.app.metadataCache.getFileCache(note);
+			const embeds = cache?.embeds ?? [];
+			if (embeds.length === 0) {
+				continue;
+			}
+
+			let content: string | null = null;
+			let changed = false;
+
+			for (const embed of embeds) {
+				const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
+					embed.link,
+					note.path,
+				);
+				if (!(linkedFile instanceof TFile)) {
+					continue;
+				}
+				if (sharedFolder.checkPath(linkedFile.path)) {
+					continue;
+				}
+				if (!this.isManagedAttachment(linkedFile.path)) {
+					continue;
+				}
+
+				const managedFolder = this.getManagedAttachmentFolderForSource(note.path);
+				const destinationPath = await this.attachmentManager.getManagedAttachmentPath(
+					linkedFile.name,
+					managedFolder,
+				);
+
+				if (!this.vault.getAbstractFileByPath(destinationPath)) {
+					await this.attachmentManager.ensureManagedFolder(managedFolder);
+					const binary = await this.vault.readBinary(linkedFile);
+					await this.vault.createBinary(destinationPath, binary);
+					await this.addManagedAttachment(destinationPath);
+				}
+
+				if (content === null) {
+					content = await this.vault.cachedRead(note);
+				}
+
+				const replacement = this.rewriteManagedEmbedLink(
+					embed.original,
+					note.path,
+					destinationPath,
+				);
+				if (content.includes(embed.original)) {
+					content = content.replace(embed.original, replacement);
+					changed = true;
+					migratedEmbeds += 1;
+				}
+			}
+
+			if (changed && content !== null) {
+				await this.vault.modify(note, content);
+			}
+		}
+
+		return migratedEmbeds;
 	}
 
 	private getSelectedFileExplorerItem(): TAbstractFile | null {
@@ -2175,8 +2287,13 @@ export default class Live extends Plugin {
 			getAvailablePathForAttachment(old: unknown) {
 				return async function (filename: string, sourcePath?: string) {
 					if (plugin.attachmentManager?.isImageFilename(filename)) {
+						const managedFolder =
+							plugin.getManagedAttachmentFolderForSource(sourcePath);
 						const managedPath =
-							await plugin.attachmentManager.getManagedAttachmentPath(filename);
+							await plugin.attachmentManager.getManagedAttachmentPath(
+								filename,
+								managedFolder,
+							);
 						plugin.attachmentManager.trackPendingManagedPath(managedPath);
 						return managedPath;
 					}
