@@ -188,8 +188,14 @@ export class LiveTokenStore extends TokenStore<ClientToken> {
 		if (!this.loginManager.loggedIn) {
 			throw new Error("Not logged in");
 		}
+		const authProvider = this.loginManager.getAuthProvider();
+		const bearerToken =
+			(await authProvider?.getValidToken()) ?? this.loginManager.user?.token;
+		if (!bearerToken) {
+			throw new Error("Missing auth token");
+		}
 		const headers = {
-			Authorization: `Bearer ${this.loginManager.user?.token}`,
+			Authorization: `Bearer ${bearerToken}`,
 			"Relay-Version": GIT_TAG,
 			"Content-Type": "application/json",
 		};

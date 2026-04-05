@@ -18,6 +18,7 @@ from app.api.routers import (
     comments,
     dashboard,
     document_versions,
+    files,
     health,
     invites,
     keys,
@@ -166,6 +167,8 @@ Get a token by calling `POST /auth/login` with valid credentials.
     app.include_router(tokens.router, prefix="/v1")
     app.include_router(keys.router, prefix="/v1")
     app.include_router(web.router)  # Web publishing public API (prefix included)
+    app.include_router(files.file_token_router)  # /file-token (root, plugin expects no /v1 prefix)
+    app.include_router(files.files_router, prefix="/v1")  # /v1/files/cas/... and /v1/files/blob/...
     app.include_router(published_links.router, prefix="/v1")  # Published links CRUD
     app.include_router(comments.router, prefix="/v1")  # Comments API
     app.include_router(document_versions.router, prefix="/v1")  # Document versions API
@@ -186,6 +189,7 @@ Get a token by calling `POST /auth/login` with valid credentials.
     app.include_router(invites.public_router, deprecated=True)
     app.include_router(tokens.router, deprecated=True)
     app.include_router(keys.router, deprecated=True)
+    app.include_router(files.file_token_router, prefix="/v1", deprecated=True)  # /v1/file-token fallback
 
     @app.on_event("startup")
     def _bootstrap_admin() -> None:
