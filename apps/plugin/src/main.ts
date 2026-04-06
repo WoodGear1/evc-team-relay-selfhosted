@@ -1672,10 +1672,11 @@ export default class Live extends Plugin {
 	}
 
 	private getManagedAttachmentFolderForSource(sourcePath?: string): string {
-		if (!sourcePath) {
+		const resolvedSourcePath = sourcePath ?? this.app.workspace.getActiveFile()?.path;
+		if (!resolvedSourcePath) {
 			return "img";
 		}
-		const sharedFolder = this.sharedFolders.lookup(sourcePath);
+		const sharedFolder = this.sharedFolders.lookup(resolvedSourcePath);
 		if (!sharedFolder) {
 			return "img";
 		}
@@ -2320,9 +2321,20 @@ export default class Live extends Plugin {
 						omitMdExtension?: boolean,
 					) {
 						const folder = plugin.sharedFolders.lookup(file.path);
+						const sourceFolder = plugin.sharedFolders.lookup(sourcePath);
 						if (folder) {
 							if (omitMdExtension === void 0) {
 								omitMdExtension = true;
+							}
+
+							// Non-markdown assets inside a shared folder should keep a
+							// share-relative path so embeds don't collapse to bare filenames.
+							if (file.extension !== "md" && sourceFolder === folder) {
+								const assetPath = relative(
+									sourcePath.split("/").slice(0, -1).join("/") || ".",
+									file.path,
+								);
+								return normalizePath(assetPath);
 							}
 
 							const fileName =
