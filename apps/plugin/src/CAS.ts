@@ -6,6 +6,57 @@ import { customFetch } from "./customFetch";
 import PocketBase from "pocketbase";
 import { HasLogging } from "./debug";
 
+function inspectBinaryPayload(buffer: ArrayBuffer): {
+	size: number;
+	signature: string;
+	isHtml: boolean;
+	isSvg: boolean;
+} {
+	const bytes = new Uint8Array(buffer);
+	const size = bytes.byteLength;
+	const ascii = new TextDecoder("utf-8", { fatal: false })
+		.decode(bytes.slice(0, Math.min(256, size)))
+		.trim()
+		.toLowerCase();
+
+	if (
+		size >= 8 &&
+		bytes[0] === 0x89 &&
+		bytes[1] === 0x50 &&
+		bytes[2] === 0x4e &&
+		bytes[3] === 0x47
+	) {
+		return { size, signature: "png", isHtml: false, isSvg: false };
+	}
+	if (size >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+		return { size, signature: "jpeg", isHtml: false, isSvg: false };
+	}
+	if (ascii.startsWith("gif87a") || ascii.startsWith("gif89a")) {
+		return { size, signature: "gif", isHtml: false, isSvg: false };
+	}
+	if (ascii.startsWith("bm")) {
+		return { size, signature: "bmp", isHtml: false, isSvg: false };
+	}
+	if (
+		size >= 12 &&
+		String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+		String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+	) {
+		return { size, signature: "webp", isHtml: false, isSvg: false };
+	}
+	if (ascii.includes("<svg")) {
+		return { size, signature: "svg", isHtml: false, isSvg: true };
+	}
+	if (
+		ascii.startsWith("<!doctype html") ||
+		ascii.startsWith("<html") ||
+		ascii.includes("<body")
+	) {
+		return { size, signature: "html", isHtml: true, isSvg: false };
+	}
+	return { size, signature: "unknown", isHtml: false, isSvg: false };
+}
+
 
 export class ContentAddressedStore extends HasLogging {
 	private pb: PocketBase;
@@ -92,7 +143,27 @@ export class ContentAddressedStore extends HasLogging {
 				`[${this.sharedFolder.path}] Download failed for ${syncFile.path}: ${downloadResponse.status}`,
 			);
 		}
-		return downloadResponse.arrayBuffer();
+		const payload = await downloadResponse.arrayBuffer();
+		if (syncFile.path.toLowerCase().startsWith("img/")) {
+			const inspection = inspectBinaryPayload(payload);
+			console.log("[Relay:attachment] cas:download-payload", {
+				path: syncFile.path,
+				hash: sha256,
+				bytes: inspection.size,
+				signature: inspection.signature,
+				contentType: downloadResponse.headers.get("content-type"),
+				contentLength: downloadResponse.headers.get("content-length"),
+			});
+			if (inspection.isHtml) {
+				throw new Error(
+					`Downloaded HTML instead of image for ${syncFile.path}`,
+				);
+			}
+			if (inspection.size === 0) {
+				throw new Error(`Downloaded empty payload for ${syncFile.path}`);
+			}
+		}
+		return payload;
 	}
 
 	async writeFile(syncFile: SyncFile): Promise<void> {
