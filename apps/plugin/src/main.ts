@@ -1676,7 +1676,15 @@ export default class Live extends Plugin {
 		if (!resolvedSourcePath) {
 			return "img";
 		}
-		const sharedFolder = this.sharedFolders.lookup(resolvedSourcePath);
+		const normalizedSourcePath = normalizePath(resolvedSourcePath);
+		const sharedFolder =
+			this.sharedFolders.lookup(normalizedSourcePath) ??
+			this.sharedFolders.find(
+				(sf) =>
+					normalizePath(sf.path) === normalizedSourcePath ||
+					normalizedSourcePath.startsWith(`${normalizePath(sf.path)}/`),
+			) ??
+			null;
 		if (!sharedFolder) {
 			return "img";
 		}
@@ -1735,7 +1743,12 @@ export default class Live extends Plugin {
 				if (sharedFolder.checkPath(linkedFile.path)) {
 					continue;
 				}
-				if (!this.isManagedAttachment(linkedFile.path)) {
+				const linkedPath = normalizePath(linkedFile.path);
+				const isManaged = this.isManagedAttachment(linkedPath);
+				const isLegacyRootImg = linkedPath.startsWith("img/");
+				const isLikelyRootPaste =
+					!linkedPath.includes("/") && linkedFile.name.startsWith("Pasted image ");
+				if (!isManaged && !isLegacyRootImg && !isLikelyRootPaste) {
 					continue;
 				}
 
@@ -2321,7 +2334,16 @@ export default class Live extends Plugin {
 						omitMdExtension?: boolean,
 					) {
 						const folder = plugin.sharedFolders.lookup(file.path);
-						const sourceFolder = plugin.sharedFolders.lookup(sourcePath);
+						const sourceFolder =
+							plugin.sharedFolders.lookup(sourcePath) ??
+							plugin.sharedFolders.find(
+								(sf) =>
+									normalizePath(sf.path) === normalizePath(sourcePath) ||
+									normalizePath(sourcePath).startsWith(
+										`${normalizePath(sf.path)}/`,
+									),
+							) ??
+							null;
 						if (folder) {
 							if (omitMdExtension === void 0) {
 								omitMdExtension = true;
