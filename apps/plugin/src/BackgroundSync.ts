@@ -117,6 +117,58 @@ export class BackgroundSync extends HasLogging {
 		return this.downloadQueue;
 	}
 
+	private hasQueuedOrActiveSync(guid: string): boolean {
+		return (
+			this.syncQueue.some((item) => item.guid === guid) ||
+			this.activeSync.some((item) => item.guid === guid) ||
+			this.syncCompletionCallbacks.has(guid)
+		);
+	}
+
+	private hasQueuedOrActiveDownload(guid: string): boolean {
+		return (
+			this.downloadQueue.some((item) => item.guid === guid) ||
+			this.activeDownloads.some((item) => item.guid === guid) ||
+			this.downloadCompletionCallbacks.has(guid)
+		);
+	}
+
+	private clearStaleSyncMarkerIfNeeded(item: SyncFile | Document | Canvas): boolean {
+		if (!this.inProgressSyncs.has(item.guid)) {
+			return false;
+		}
+		if (this.hasQueuedOrActiveSync(item.guid)) {
+			return false;
+		}
+		if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+			console.warn("[Relay:attachment] queue:clear-stale-sync-marker", {
+				path: item.path,
+				guid: item.guid,
+			});
+		}
+		this.inProgressSyncs.delete(item.guid);
+		this.syncCompletionCallbacks.delete(item.guid);
+		return true;
+	}
+
+	private clearStaleDownloadMarkerIfNeeded(item: SyncFile | Document | Canvas): boolean {
+		if (!this.inProgressDownloads.has(item.guid)) {
+			return false;
+		}
+		if (this.hasQueuedOrActiveDownload(item.guid)) {
+			return false;
+		}
+		if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+			console.warn("[Relay:attachment] queue:clear-stale-download-marker", {
+				path: item.path,
+				guid: item.guid,
+			});
+		}
+		this.inProgressDownloads.delete(item.guid);
+		this.downloadCompletionCallbacks.delete(item.guid);
+		return true;
+	}
+
 	getOverallProgress(): SyncProgress {
 		let totalItems = 0;
 		let completedItems = 0;
@@ -451,8 +503,18 @@ export class BackgroundSync extends HasLogging {
 	 * @returns A promise that resolves when the sync completes
 	 */
 	async enqueueSync(item: SyncFile | Document | Canvas): Promise<void> {
+		this.clearStaleSyncMarkerIfNeeded(item);
 		// Skip if already in progress
 		if (this.inProgressSyncs.has(item.guid)) {
+			if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+				console.warn("[Relay:attachment] queue:skip-sync-in-progress", {
+					path: item.path,
+					guid: item.guid,
+					queued: this.syncQueue.some((q) => q.guid === item.guid),
+					active: this.activeSync.some((q) => q.guid === item.guid),
+					hasCallback: this.syncCompletionCallbacks.has(item.guid),
+				});
+			}
 			this.debug(
 				`[enqueueSync] Item ${item.guid} already in progress, skipping`,
 			);
@@ -522,8 +584,18 @@ export class BackgroundSync extends HasLogging {
 	 * @returns A promise that resolves when the download completes
 	 */
 	enqueueDownload(item: SyncFile | Document | Canvas): Promise<void> {
+		this.clearStaleDownloadMarkerIfNeeded(item);
 		// Skip if already in progress
 		if (this.inProgressDownloads.has(item.guid)) {
+			if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+				console.warn("[Relay:attachment] queue:skip-download-in-progress", {
+					path: item.path,
+					guid: item.guid,
+					queued: this.downloadQueue.some((q) => q.guid === item.guid),
+					active: this.activeDownloads.some((q) => q.guid === item.guid),
+					hasCallback: this.downloadCompletionCallbacks.has(item.guid),
+				});
+			}
 			this.debug(
 				`[enqueueDownload] Item ${item.guid} already in progress, skipping`,
 			);
@@ -613,6 +685,9 @@ export class BackgroundSync extends HasLogging {
 			syncFiles: syncFiles.length,
 			imageSyncFiles: attachmentPaths.length,
 			imageSample: attachmentPaths.slice(0, 10),
+			syncQueueLength: this.syncQueue.length,
+			activeSyncs: this.activeSync.size,
+			isPaused: this.isPaused,
 		});
 
 		// Create sync group with properly initialized counters
@@ -659,8 +734,18 @@ export class BackgroundSync extends HasLogging {
 	private async enqueueForGroupSync(
 		item: Document | Canvas | SyncFile,
 	): Promise<void> {
+		this.clearStaleSyncMarkerIfNeeded(item);
 		// Skip if already in progress
 		if (this.inProgressSyncs.has(item.guid)) {
+			if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+				console.warn("[Relay:attachment] queue:skip-group-sync-in-progress", {
+					path: item.path,
+					guid: item.guid,
+					queued: this.syncQueue.some((q) => q.guid === item.guid),
+					active: this.activeSync.some((q) => q.guid === item.guid),
+					hasCallback: this.syncCompletionCallbacks.has(item.guid),
+				});
+			}
 			this.debug(
 				`[enqueueForGroupSync] Item ${item.guid} already in progress, skipping`,
 			);
