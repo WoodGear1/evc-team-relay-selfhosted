@@ -78,6 +78,35 @@ const YjsInternalsPlugin = {
 	},
 };
 
+// Ensure all `yjs` imports resolve to the same copy.
+const yjsMainPath = require.resolve("yjs");
+const YjsDedupePlugin = {
+	name: "yjs-dedupe",
+	setup(build) {
+		build.onResolve({ filter: /^yjs$/ }, () => {
+			return { path: yjsMainPath };
+		});
+	},
+};
+
+// Strip Yjs duplicate-import check from the bundle.
+// Obsidian's runtime loads its own Yjs copy; our bundled copy triggers
+// a false-positive warning. We remove the check at load time.
+const YjsStripDuplicateCheckPlugin = {
+	name: "yjs-strip-duplicate-check",
+	setup(build) {
+		build.onLoad({ filter: /yjs[/\\]dist[/\\]yjs\.cjs$/ }, async (args) => {
+			let contents = fs.readFileSync(args.path, "utf8");
+			// Replace the duplicate check block with a no-op
+			contents = contents.replace(
+				/if\s*\(glo\[importIdentifier\]\s*===\s*true\)\s*\{[\s\S]*?console\.error\([^)]*\);\s*\}\s*\nglo\[importIdentifier\]\s*=\s*true;/,
+				"// Yjs duplicate check removed by esbuild plugin"
+			);
+			return { contents, loader: "js" };
+		});
+	},
+};
+
 const context = await esbuild.context({
 	banner: {
 		js: banner,
@@ -107,6 +136,8 @@ const context = await esbuild.context({
 			compilerOptions: { css: true },
 			preprocess: sveltePreprocess(),
 		}),
+		YjsDedupePlugin,
+		YjsStripDuplicateCheckPlugin,
 		YjsInternalsPlugin,
 		NotifyPlugin,
 	],

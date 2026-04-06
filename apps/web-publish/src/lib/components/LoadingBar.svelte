@@ -52,11 +52,11 @@
 		position: fixed;
 		top: 0;
 		left: 0;
-		height: 3px;
-		background: linear-gradient(90deg, #0066cc, #0099ff);
+		height: 2px;
+		background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent)));
 		transition: width 0.2s ease-out;
 		z-index: 9999;
-		box-shadow: 0 0 10px rgba(0, 102, 204, 0.5);
+		box-shadow: 0 0 12px hsl(var(--primary) / 0.4);
 	}
 
 	@media (prefers-reduced-motion: reduce) {

@@ -89,6 +89,13 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 		sameSite: 'lax',
 		maxAge: tokenResponse.expires_in || 86400
 	});
+	cookies.set('refresh_token', tokenResponse.refresh_token, {
+		path: '/',
+		httpOnly: true,
+		secure: url.protocol === 'https:',
+		sameSite: 'lax',
+		maxAge: 60 * 60 * 24 * 30
+	});
 
 	return json({
 		success: true,

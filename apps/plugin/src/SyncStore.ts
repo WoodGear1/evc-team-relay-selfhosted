@@ -60,15 +60,22 @@ export class SyncStore extends Observable<SyncStore> {
 		);
 	}
 
+	isAlwaysSyncedAsset(vpath: string): boolean {
+		const normalized = vpath.toLowerCase();
+		if (!normalized.startsWith("img/")) {
+			return false;
+		}
+		const ext = normalized.split(".").pop() || "";
+		return ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(
+			ext,
+		);
+	}
+
 	canSync(vpath: string): boolean {
 		// Managed note attachments live in <share>/img/... and should always sync,
 		// even if user file-type toggles were changed on one of the clients.
-		const normalized = vpath.toLowerCase();
-		if (normalized.startsWith("img/")) {
-			const ext = normalized.split(".").pop() || "";
-			if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext)) {
-				return true;
-			}
+		if (this.isAlwaysSyncedAsset(vpath)) {
+			return true;
 		}
 		const meta = this.getMeta(vpath);
 		return this.typeRegistry.canSync(vpath, meta);

@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build:plugin": "npm --prefix apps/plugin run build",
+    "sync:plugin-dist": "powershell -ExecutionPolicy Bypass -File deploy/sync-plugin-dist.ps1",
     "release:plugin": "npm --prefix apps/plugin run release",
     "beta:plugin": "npm --prefix apps/plugin run beta",
     "test:plugin": "npm --prefix apps/plugin run test",

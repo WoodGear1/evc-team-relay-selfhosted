@@ -280,6 +280,10 @@ class ShareMember(Base, TimestampMixin):
     share: Mapped["Share"] = relationship(back_populates="members")
     user: Mapped["User"] = relationship(back_populates="memberships")
 
+    @property
+    def user_email(self) -> str | None:
+        return self.user.email if self.user else None
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

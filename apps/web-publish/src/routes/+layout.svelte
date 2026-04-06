@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import '../app.css';
 	import Sidebar from '$lib/components/Sidebar.svelte';
+import ViewerTopbar from '$lib/components/ViewerTopbar.svelte';
 	import LoadingBar from '$lib/components/LoadingBar.svelte';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
@@ -19,8 +20,8 @@
 
 	let { children, data } = $props();
 
-	// Determine if user is authenticated (stub for now)
-	let isAuthenticated = $state(false);
+const currentUser = $derived(data?.currentUser || null);
+const isAuthenticated = $derived(Boolean(currentUser));
 
 	// Check if on home page
 	const isHomePage = $derived($page.url.pathname === '/');
@@ -31,6 +32,8 @@
 	const currentSlug = $derived($page.data?.share?.web_slug);
 	// Current path for highlighting active item in file tree
 	const currentPath = $derived($page.data?.filePath || '');
+const resourceKind = $derived($page.data?.resourceKind || 'share');
+const adminUrl = $derived(data?.adminUrl || null);
 
 	// Get branding from server info (from layout load)
 	const branding = $derived(data?.serverInfo?.branding);
@@ -126,12 +129,22 @@
 			{branding}
 			{themeMode}
 			{resolvedTheme}
+			{adminUrl}
 			onThemeModeChange={handleThemeModeChange}
 			onCollapseChange={handleSidebarCollapseChange}
 		/>
 	{/if}
 	<main class="main-content" class:collapsed={sidebarCollapsed} class:home-page={isHomePage}>
 		<div class="content-wrapper" class:home-page={isHomePage}>
+			{#if !isHomePage}
+				<ViewerTopbar
+					currentSlug={currentSlug}
+					currentPath={currentPath}
+					resourceKind={resourceKind}
+					currentUser={currentUser}
+					enableSearch={Boolean(currentSlug && folderItems?.length)}
+				/>
+			{/if}
 			{@render children()}
 		</div>
 	</main>
@@ -145,10 +158,9 @@
 	:global(body) {
 		margin: 0;
 		padding: 0;
-		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-			sans-serif;
-		background-color: var(--background);
-		color: var(--foreground);
+		font-family: var(--font-sans, 'Inter', system-ui, -apple-system, sans-serif);
+		background-color: hsl(var(--background));
+		color: hsl(var(--foreground));
 		line-height: 1.6;
 	}
 
@@ -161,7 +173,7 @@
 	}
 
 	:global(:focus-visible) {
-		outline: 2px solid var(--ring);
+		outline: 2px solid hsl(var(--ring) / 0.5);
 		outline-offset: 2px;
 	}
 
@@ -173,12 +185,14 @@
 	.main-content {
 		flex: 1;
 		margin-left: 250px;
-		padding: 2rem;
-		transition: margin-left 0.3s ease-out;
+		--sidebar-current-width: 250px;
+		padding: 2rem 2.5rem;
+		transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 	}
 
 	.main-content.collapsed {
 		margin-left: 60px;
+		--sidebar-current-width: 60px;
 	}
 
 	.main-content.home-page {
@@ -199,7 +213,6 @@
 		width: 100%;
 	}
 
-	/* Mobile responsiveness */
 	@media (max-width: 768px) {
 		.app-container {
 			flex-direction: column;
@@ -207,18 +220,17 @@
 
 		.main-content {
 			margin-left: 0;
+			--sidebar-current-width: 0px;
 			padding: 1rem;
 		}
 	}
 
-	/* Tablet */
 	@media (min-width: 769px) and (max-width: 1024px) {
 		.main-content {
 			padding: 1.5rem;
 		}
 	}
 
-	/* Reduce motion for accessibility */
 	@media (prefers-reduced-motion: reduce) {
 		:global(html) {
 			scroll-behavior: auto;

@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.api import deps
+from app.core import security
 from app.core.config import get_settings
 from app.db import models
 from app.db.session import get_db
@@ -85,7 +86,7 @@ def render_template(
             ctx["branding"] = instance_settings_service.get_branding(db)
         except Exception:
             ctx["branding"] = None
-    return templates.TemplateResponse(template, ctx)
+    return templates.TemplateResponse(request=request, name=template, context=ctx)
 
 
 @router.get("", response_class=HTMLResponse)
@@ -116,6 +117,7 @@ def login_submit(
     db: Session = Depends(get_db),
 ):
     """Process login form."""
+    settings = get_settings()
     try:
         # Authenticate user
         user = auth_service.authenticate_user(db, email, password)
@@ -126,8 +128,10 @@ def login_submit(
                 {"error": "Invalid credentials or insufficient privileges", "email": email},
             )
 
-        # Generate token
-        token = auth_service.create_access_token(user.id)
+        # Keep the admin UI signed in for the same window as refresh sessions.
+        admin_session_minutes = max(1, settings.refresh_token_expire_days) * 24 * 60
+        admin_cookie_max_age = max(1, settings.refresh_token_expire_days) * 24 * 60 * 60
+        token = security.create_access_token(str(user.id), expires_minutes=admin_session_minutes)
 
         # Log the login
         auth_service.log_login(
@@ -143,8 +147,9 @@ def login_submit(
             key="admin_token",
             value=token,
             httponly=True,
-            max_age=3600,  # 1 hour
+            max_age=admin_cookie_max_age,
             samesite="lax",
+            secure=request.url.scheme == "https",
         )
         return response
 

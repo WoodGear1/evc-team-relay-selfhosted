@@ -17,7 +17,7 @@
 </script>
 
 <svelte:head>
-	<title>{pageTitle} - {data.share.path} - {branding?.name || 'Relay'}</title>
+	<title>{pageTitle} - {data.share.path} - {branding?.name || 'Docs'}</title>
 	<meta name="description" content={description} />
 	<meta property="og:title" content="{pageTitle} - {data.share.path}" />
 	<meta property="og:description" content={description} />
@@ -55,8 +55,7 @@
 			{backUrl}
 		/>
 
-		<h1 class="text-3xl font-bold text-foreground mb-4 leading-tight">{data.file.name}</h1>
-		<hr class="mb-8 border-border" />
+		<h1 class="text-3xl font-bold text-foreground mb-6 leading-tight tracking-tight">{data.file.name}</h1>
 
 		<div class="flex gap-8 items-start">
 			<div class="flex-1 min-w-0 max-w-[800px]">
@@ -68,7 +67,7 @@
 			<div class="mt-10 grid gap-4 sm:grid-cols-2">
 				{#if data.previousPage}
 					<a
-						class="rounded-lg border border-border px-4 py-3 hover:bg-muted transition-colors"
+						class="pager-link rounded-lg border border-border px-4 py-3 transition-colors"
 						href="/{data.parentSlug}/{data.previousPage.slugPath}"
 					>
 						<div class="text-xs text-muted-foreground mb-1">Previous page</div>
@@ -80,7 +79,7 @@
 
 				{#if data.nextPage}
 					<a
-						class="rounded-lg border border-border px-4 py-3 text-right hover:bg-muted transition-colors"
+						class="pager-link rounded-lg border border-border px-4 py-3 text-right transition-colors"
 						href="/{data.parentSlug}/{data.nextPage.slugPath}"
 					>
 						<div class="text-xs text-muted-foreground mb-1">Next page</div>
@@ -91,3 +90,32 @@
 		{/if}
 	</article>
 </div>
+
+<style>
+	.pager-link,
+	.pager-link:hover,
+	.pager-link:focus-visible,
+	.pager-link * {
+		text-decoration: none !important;
+	}
+
+	.pager-link {
+		display: block;
+		border-radius: 0.75rem;
+		border: 1px solid hsl(var(--border) / 0.4);
+		background: hsl(var(--card) / 0.6);
+		padding: 1rem 1.25rem;
+		transition: background-color 0.25s cubic-bezier(0.4,0,0.2,1),
+		            border-color 0.25s cubic-bezier(0.4,0,0.2,1),
+		            box-shadow 0.25s cubic-bezier(0.4,0,0.2,1),
+		            transform 0.25s cubic-bezier(0.4,0,0.2,1);
+	}
+
+	.pager-link:hover,
+	.pager-link:focus-visible {
+		background: hsl(var(--primary) / 0.06);
+		border-color: hsl(var(--primary) / 0.25);
+		box-shadow: 0 6px 20px hsl(var(--primary) / 0.08);
+		transform: translateY(-2px);
+	}
+</style>

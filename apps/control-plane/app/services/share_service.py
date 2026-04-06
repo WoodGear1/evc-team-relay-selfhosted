@@ -265,7 +265,20 @@ def update_share(
         new_has_items = len(payload.web_folder_items) > 0
         changes["web_folder_items"] = {"old": old_has_items, "new": new_has_items}
         if payload.web_folder_items:
-            share.web_folder_items = [item.model_dump() for item in payload.web_folder_items]
+            existing_items = {
+                item.get("path"): item for item in (share.web_folder_items or []) if item.get("path")
+            }
+            merged_items = []
+            for item in payload.web_folder_items:
+                item_data = item.model_dump()
+                existing = existing_items.get(item_data["path"])
+                if existing:
+                    for preserved_key in ("content", "content_updated_at", "excerpt"):
+                        if preserved_key in existing and existing[preserved_key] is not None:
+                            if preserved_key not in item_data or item_data[preserved_key] is None:
+                                item_data[preserved_key] = existing[preserved_key]
+                merged_items.append(item_data)
+            share.web_folder_items = merged_items
         else:
             share.web_folder_items = None
 
@@ -360,31 +373,18 @@ def add_member(
     }
 
 
-def list_members(db: Session, share: models.Share) -> list[dict]:
+def list_members(db: Session, share: models.Share) -> list[models.ShareMember]:
     """
-    List all members of a share with user emails.
-    Returns dicts with ShareMember data + user_email for better UX.
+    List all members of a share with eagerly-loaded user relationships.
     """
+    from sqlalchemy.orm import joinedload
+
     stmt = (
-        select(models.ShareMember, models.User.email)
-        .join(models.User, models.ShareMember.user_id == models.User.id)
+        select(models.ShareMember)
+        .options(joinedload(models.ShareMember.user))
         .where(models.ShareMember.share_id == share.id)
     )
-    results = db.execute(stmt).all()
-
-    # Convert to dict format that matches ShareMemberRead schema
-    members = []
-    for member, email in results:
-        members.append(
-            {
-                "id": member.id,
-                "share_id": member.share_id,
-                "user_id": member.user_id,
-                "user_email": email,
-                "role": member.role,
-            }
-        )
-    return members
+    return list(db.execute(stmt).scalars().all())
 
 
 def update_member_role(

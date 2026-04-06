@@ -275,22 +275,25 @@
 		text-align: left;
 		cursor: pointer;
 		border-radius: 0.375rem;
-		transition: background-color 0.15s ease;
+		transition: background-color 0.22s cubic-bezier(0.4,0,0.2,1),
+		            color 0.22s cubic-bezier(0.4,0,0.2,1);
 	}
 
 	:global(.tree-item:hover) {
-		background-color: var(--sidebar-accent);
+		background: hsl(var(--primary) / 0.08);
+		color: hsl(var(--foreground));
+		text-decoration: none;
 	}
 
 	:global(.tree-item:focus-visible) {
-		outline: 2px solid var(--sidebar-ring);
+		outline: 2px solid hsl(var(--ring) / 0.4);
 		outline-offset: -2px;
 	}
 
 	:global(.tree-item.active) {
-		background-color: var(--sidebar-accent);
-		color: var(--sidebar-accent-foreground);
-		font-weight: 500;
+		background: hsl(var(--primary) / 0.12);
+		color: hsl(var(--foreground));
+		font-weight: 600;
 	}
 
 	:global(.tree-item .icon) {
@@ -299,10 +302,15 @@
 		justify-content: center;
 		flex-shrink: 0;
 		color: var(--muted-foreground);
+		transition: color 0.22s cubic-bezier(0.4,0,0.2,1);
+	}
+
+	:global(.tree-item:hover .icon) {
+		color: hsl(var(--primary) / 0.7);
 	}
 
 	:global(.tree-item.active .icon) {
-		color: var(--sidebar-primary);
+		color: hsl(var(--primary));
 	}
 
 	:global(.tree-item .name) {

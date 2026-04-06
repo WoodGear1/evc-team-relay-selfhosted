@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 
-	// Error details
 	let errorCode = $derived($page.status || 500);
 	let errorMessage = $derived($page.error?.message || 'An unexpected error occurred');
+	const branding = $derived($page.data?.serverInfo?.branding);
 
 	// Build login URL with return path
 	let loginUrl = $derived(`/login?return=${encodeURIComponent($page.url.pathname)}`);
@@ -42,7 +42,7 @@
 </script>
 
 <svelte:head>
-	<title>{errorCode} - {customError.title} - Relay</title>
+	<title>{errorCode} - {customError.title} - {branding?.name || 'Docs'}</title>
 </svelte:head>
 
 <div class="error-container">

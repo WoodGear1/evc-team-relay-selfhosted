@@ -1,16 +1,15 @@
 /**
- * Global styles for Relay Web Publish
- * EVC Team Relay Theme with Tailwind CSS
+ * Global styles for Web Publish
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ================================
-   EVC Team Relay Color Palette (HSL)
+   Color Palette (HSL)
    ================================ */
 @layer base {
 	:root {
@@ -22,7 +21,7 @@
 		--page-text: hsl(var(--foreground));
 		--page-accent: hsl(var(--primary));
 
-		/* Primary - Indigo (HSL) */
+		/* Primary - Indigo */
 		--primary: 239 84% 67%;
 		--primary-hover: 239 84% 60%;
 		--primary-foreground: 0 0% 100%;
@@ -60,7 +59,7 @@
 		--ring: 239 84% 67%;
 		--radius: 0.5rem;
 
-		/* Sidebar - Light gray background per brandkit */
+		/* Sidebar */
 		--sidebar-background: 0 0% 98%;
 		--sidebar-foreground: 220 9% 46%;
 		--sidebar-primary: 239 84% 67%;
@@ -77,60 +76,64 @@
 		--code-inline-fg: 258 90% 66%;
 
 		/* Effects */
-		--shadow: rgba(0, 0, 0, 0.1);
-		--shadow-lg: rgba(0, 0, 0, 0.15);
+		--shadow: rgba(0, 0, 0, 0.08);
+		--shadow-lg: rgba(0, 0, 0, 0.12);
+		--glass-bg: rgba(255, 255, 255, 0.7);
+		--glass-border: rgba(255, 255, 255, 0.3);
 	}
 
 	.dark {
-		/* Primary - Lighter Indigo for dark mode */
+		/* Primary - Softer Indigo for dark mode */
 		--primary: 239 84% 70%;
-		--primary-hover: 239 84% 67%;
-		--primary-foreground: 243 75% 8%;
+		--primary-hover: 239 84% 75%;
+		--primary-foreground: 0 0% 100%;
 
 		/* Secondary */
-		--secondary: 243 30% 20%;
-		--secondary-foreground: 250 100% 98%;
+		--secondary: 243 25% 16%;
+		--secondary-foreground: 250 100% 95%;
 
-		/* Background */
-		--background: 243 75% 8%;
-		--foreground: 250 100% 98%;
-		--muted: 243 30% 15%;
-		--muted-foreground: 243 15% 65%;
-		--card: 243 75% 11%;
-		--card-foreground: 250 100% 98%;
-		--popover: 243 75% 11%;
-		--popover-foreground: 250 100% 98%;
+		/* Background - Deep dark indigo */
+		--background: 240 20% 6%;
+		--foreground: 240 10% 93%;
+		--muted: 240 15% 11%;
+		--muted-foreground: 240 10% 55%;
+		--card: 240 18% 9%;
+		--card-foreground: 240 10% 93%;
+		--popover: 240 18% 9%;
+		--popover-foreground: 240 10% 93%;
 
 		/* Accent */
-		--accent: 258 90% 70%;
-		--accent-foreground: 243 75% 8%;
+		--accent: 258 80% 72%;
+		--accent-foreground: 0 0% 100%;
 
 		/* UI Elements */
-		--border: 243 30% 18%;
-		--input: 243 30% 18%;
+		--border: 240 15% 15%;
+		--input: 240 15% 15%;
 		--ring: 239 84% 70%;
 
-		/* Sidebar dark */
-		--sidebar-background: 243 75% 6%;
-		--sidebar-foreground: 243 15% 65%;
+		/* Sidebar dark - deep with subtle transparency */
+		--sidebar-background: 240 22% 5%;
+		--sidebar-foreground: 240 10% 55%;
 		--sidebar-primary: 239 84% 70%;
-		--sidebar-primary-foreground: 243 75% 8%;
-		--sidebar-accent: 243 30% 15%;
-		--sidebar-accent-foreground: 239 84% 70%;
-		--sidebar-border: 243 30% 18%;
+		--sidebar-primary-foreground: 0 0% 100%;
+		--sidebar-accent: 240 15% 12%;
+		--sidebar-accent-foreground: 239 84% 75%;
+		--sidebar-border: 240 15% 14%;
 		--sidebar-ring: 239 84% 70%;
 
 		/* Code inline dark */
-		--code-inline-bg: 243 30% 15%;
-		--code-inline-fg: 263 70% 75%;
+		--code-inline-bg: 240 15% 13%;
+		--code-inline-fg: 263 70% 78%;
 
 		/* Semantic adjusted for dark */
-		--destructive: 0 63% 45%;
+		--destructive: 0 63% 50%;
 		--destructive-hover: 0 84% 60%;
 
 		/* Effects */
-		--shadow: rgba(0, 0, 0, 0.3);
-		--shadow-lg: rgba(0, 0, 0, 0.4);
+		--shadow: rgba(0, 0, 0, 0.4);
+		--shadow-lg: rgba(0, 0, 0, 0.55);
+		--glass-bg: rgba(10, 10, 20, 0.65);
+		--glass-border: rgba(255, 255, 255, 0.06);
 	}
 
 	* {
@@ -155,7 +158,6 @@
 		color: var(--page-text);
 	}
 
-	/* Ensure text is always selectable in main content area */
 	main, article, .markdown-content, div, h1, h2, h3, h4, h5, h6, p, li, td, th, blockquote, span, a {
 		-webkit-user-select: text !important;
 		-moz-user-select: text !important;
@@ -164,14 +166,12 @@
 		-webkit-touch-callout: default !important;
 	}
 
-	/* Ensure main content is above any potential overlays and receives pointer events */
 	main {
 		position: relative;
 		z-index: 1;
 		pointer-events: auto !important;
 	}
 
-	/* Ensure article and content wrapper receive events */
 	article, .content-wrapper, .markdown-content {
 		pointer-events: auto !important;
 		-webkit-user-drag: none !important;
@@ -197,23 +197,35 @@ p {
 }
 
 a {
-	@apply text-primary transition-colors;
+	@apply text-primary;
 	text-decoration: none;
+	transition: color 0.2s cubic-bezier(0.4,0,0.2,1),
+	            opacity 0.2s cubic-bezier(0.4,0,0.2,1);
 }
 
 a:hover {
-	text-decoration: underline;
-	opacity: 0.9;
+	color: hsl(var(--primary-hover));
+	opacity: 0.92;
 }
 
 a:focus-visible {
 	@apply outline-2 outline-ring outline-offset-2 rounded-sm;
 }
 
-/* Selection */
+/* Content links inside prose get underline on hover */
+.markdown-content a:hover,
+article a:hover,
+.published-page a:hover {
+	text-decoration: underline;
+}
+
 ::selection {
-	background-color: hsl(var(--primary));
-	color: hsl(var(--primary-foreground));
+	background-color: hsl(var(--primary) / 0.3);
+	color: hsl(var(--foreground));
+}
+
+.dark ::selection {
+	background-color: hsl(var(--primary) / 0.4);
 }
 
 /* ================================
@@ -224,6 +236,12 @@ button {
 	font-size: inherit;
 	line-height: inherit;
 	cursor: pointer;
+	transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1),
+	            color 0.2s cubic-bezier(0.4,0,0.2,1),
+	            border-color 0.2s cubic-bezier(0.4,0,0.2,1),
+	            box-shadow 0.2s cubic-bezier(0.4,0,0.2,1),
+	            transform 0.2s cubic-bezier(0.4,0,0.2,1),
+	            opacity 0.2s cubic-bezier(0.4,0,0.2,1);
 }
 
 button:focus-visible {
@@ -259,25 +277,33 @@ pre {
 code {
 	background-color: hsl(var(--code-inline-bg));
 	color: hsl(var(--code-inline-fg));
-	padding: 0.2em 0.4em;
-	border-radius: 3px;
-	font-size: 0.9em;
+	padding: 0.15em 0.4em;
+	border-radius: 5px;
+	font-size: 0.875em;
+	border: 1px solid hsl(var(--border) / 0.5);
 }
 
 pre {
 	background-color: hsl(var(--code-bg));
 	color: hsl(var(--code-fg));
-	padding: 1rem;
-	border-radius: 8px;
+	padding: 1.25rem;
+	border-radius: 12px;
 	overflow-x: auto;
-	line-height: 1.5;
+	line-height: 1.6;
+	border: 1px solid hsl(var(--border) / 0.3);
+}
+
+.dark pre {
+	background: linear-gradient(145deg, hsl(240 20% 10%), hsl(240 20% 8%));
+	box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 pre code {
 	background-color: transparent;
 	padding: 0;
 	color: inherit;
-	font-size: 0.875rem;
+	font-size: 0.8125rem;
+	border: none;
 }
 
 /* ================================
@@ -298,6 +324,10 @@ th {
 	@apply bg-secondary text-secondary-foreground font-semibold;
 }
 
+.dark th {
+	background: hsl(var(--muted) / 0.5);
+}
+
 /* ================================
    Lists
    ================================ */
@@ -315,17 +345,21 @@ li {
    Blockquotes
    ================================ */
 blockquote {
-	@apply text-muted-foreground border-l-4 border-border italic;
+	@apply text-muted-foreground border-l-4 italic;
+	border-left-color: hsl(var(--primary) / 0.4);
 	margin: 0 0 1rem 0;
-	padding-left: 1rem;
+	padding: 0.5rem 1rem;
+	border-radius: 0 8px 8px 0;
+	background: hsl(var(--muted) / 0.3);
 }
 
 /* ================================
    Horizontal Rules
    ================================ */
 hr {
-	@apply border-t border-border;
-	border-bottom: none;
+	border: none;
+	height: 1px;
+	background: linear-gradient(to right, transparent, hsl(var(--border)), transparent);
 	margin: 2rem 0;
 }
 
@@ -336,26 +370,36 @@ img {
 	max-width: 100%;
 	height: auto;
 	display: block;
+	border-radius: 8px;
 }
 
 /* ================================
    Scrollbar Styling
    ================================ */
 ::-webkit-scrollbar {
-	width: 12px;
-	height: 12px;
+	width: 8px;
+	height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-	@apply bg-secondary;
+	background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-	@apply bg-border rounded-md;
+	background: hsl(var(--border));
+	border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-	@apply bg-muted-foreground;
+	background: hsl(var(--muted-foreground) / 0.4);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+	background: hsl(240 15% 20%);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+	background: hsl(240 15% 30%);
 }
 
 /* ================================
@@ -397,10 +441,18 @@ img {
 .custom-card {
 	margin: 1.5rem 0;
 	padding: 1.1rem 1.2rem;
-	border: 1px solid hsl(var(--border));
+	border: 1px solid hsl(var(--border) / 0.5);
 	border-radius: 1rem;
-	background: linear-gradient(180deg, hsl(var(--card)), hsl(var(--muted)));
-	box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+	background: linear-gradient(180deg, hsl(var(--card)), hsl(var(--muted) / 0.5));
+	box-shadow: 0 4px 20px var(--shadow);
+}
+
+.dark .custom-card {
+	background: linear-gradient(180deg, hsl(var(--card) / 0.8), hsl(var(--muted) / 0.4));
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	border-color: hsl(var(--border) / 0.3);
+	box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .custom-card-title {
@@ -455,10 +507,17 @@ img {
 
 .custom-tabs {
 	margin: 1.5rem 0;
-	border: 1px solid hsl(var(--border));
+	border: 1px solid hsl(var(--border) / 0.5);
 	border-radius: 1rem;
 	background: hsl(var(--card));
 	overflow: hidden;
+}
+
+.dark .custom-tabs {
+	background: hsl(var(--card) / 0.6);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	border-color: hsl(var(--border) / 0.3);
 }
 
 .tab-headers {
@@ -466,8 +525,8 @@ img {
 	flex-wrap: wrap;
 	gap: 0.5rem;
 	padding: 0.75rem;
-	background: hsl(var(--muted));
-	border-bottom: 1px solid hsl(var(--border));
+	background: hsl(var(--muted) / 0.5);
+	border-bottom: 1px solid hsl(var(--border) / 0.5);
 }
 
 .custom-tabs-input {

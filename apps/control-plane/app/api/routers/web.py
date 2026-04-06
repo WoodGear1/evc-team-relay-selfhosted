@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -19,6 +20,7 @@ from app.core import security
 from app.core.config import get_settings
 from app.db import models
 from app.db.session import get_db
+from app.services import published_link_service
 from app.services.web_session_service import WebSessionService
 
 router = APIRouter(prefix="/v1/web", tags=["web"])
@@ -37,11 +39,20 @@ class WebSharePublic(BaseModel):
     """Public share data for web rendering."""
 
     id: str
+    published_link_id: str | None = None
+    target_type: str | None = None
+    target_id: str | None = None
     kind: str
     path: str
     visibility: str
     web_slug: str
     web_noindex: bool
+    title: str | None = None
+    description: str | None = None
+    page_title: str | None = None
+    theme_preset: str | None = None
+    allow_comments: bool = False
+    page_metadata: dict | None = None
     created_at: datetime
     updated_at: datetime
     web_content: str | None = None
@@ -75,12 +86,307 @@ class WebContentUpdateRequest(BaseModel):
     content: str
 
 
+class WebSearchHit(BaseModel):
+    """Single full-text search result for a published document."""
+
+    path: str
+    name: str
+    type: str
+    snippet: str
+    score: int
+
+
 class WebAssetUploadRequest(BaseModel):
     """Request to upload a web asset (image)."""
 
     path: str
     data: str  # base64-encoded binary data
     content_type: str
+
+
+def _decode_web_user_id(token: str):
+    from uuid import UUID
+
+    payload = security.decode_access_token(token)
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid token",
+        )
+    return UUID(user_id_str)
+
+
+def _request_bearer_token(request: Request) -> str | None:
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    return auth_header.split(" ", 1)[1]
+
+
+def _user_can_access_share(db: Session, share: models.Share, user_id) -> bool:
+    if share.owner_user_id == user_id:
+        return True
+
+    member_stmt = select(models.ShareMember).where(
+        models.ShareMember.share_id == share.id,
+        models.ShareMember.user_id == user_id,
+    )
+    return db.execute(member_stmt).scalar_one_or_none() is not None
+
+
+def _extract_folder_file_content(
+    share: models.Share,
+    target_path: str,
+) -> tuple[str | None, list[WebFolderItem] | None]:
+    folder_items_data = share.web_folder_items or []
+    folder_items = [WebFolderItem(**item) for item in folder_items_data] if folder_items_data else None
+
+    if share.kind == models.ShareKind.DOC:
+        return share.web_content, folder_items
+
+    for item in folder_items_data:
+        if item.get("path") == target_path and item.get("type") == "doc":
+            return item.get("content", ""), folder_items
+
+    return None, folder_items
+
+
+def _folder_item_has_content(item: dict) -> bool:
+    return "content" in item and item.get("content") is not None
+
+
+def _get_web_session_max_age(settings) -> int:
+    return max(1, settings.refresh_token_expire_days) * 24 * 60 * 60
+
+
+def _ensure_share_content_access(db: Session, request: Request, share: models.Share) -> None:
+    if share.visibility == models.ShareVisibility.PROTECTED:
+        session_token = request.cookies.get("web_session")
+        if not session_token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Authentication required for protected share",
+            )
+        if not WebSessionService.validate_web_session(session_token, share.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or expired session",
+            )
+
+    if share.visibility == models.ShareVisibility.PRIVATE:
+        token = _request_bearer_token(request)
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Private shares require user authentication",
+            )
+        try:
+            user_id = _decode_web_user_id(token)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or expired token",
+            )
+
+        if not _user_can_access_share(db, share, user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this share",
+            )
+
+
+def _build_search_snippet(content: str, query: str, max_length: int = 180) -> str:
+    if not content:
+        return "No synced content yet."
+
+    lowered = content.lower()
+    query_index = lowered.find(query.lower())
+    if query_index == -1:
+        snippet = content[:max_length].strip()
+        return snippet + ("..." if len(content) > max_length else "")
+
+    start = max(0, query_index - 60)
+    end = min(len(content), query_index + max_length - 60)
+    snippet = content[start:end].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(content):
+        snippet = snippet + "..."
+    return re.sub(r"\s+", " ", snippet)
+
+
+def _search_folder_items(folder_items: list[dict], query: str, limit: int) -> list[WebSearchHit]:
+    normalized_query = query.strip().lower()
+    if not normalized_query:
+        return []
+
+    results: list[WebSearchHit] = []
+    for item in folder_items:
+        if item.get("type") not in {"doc", "canvas"}:
+            continue
+
+        path = item.get("path", "")
+        name = item.get("name", path.split("/")[-1])
+        content = item.get("content") or ""
+        path_lower = path.lower()
+        name_lower = name.lower()
+        content_lower = content.lower()
+
+        score = 0
+        if normalized_query in name_lower:
+            score += 90
+        if normalized_query in path_lower:
+            score += 70
+        if normalized_query in content_lower:
+            score += 40
+        if score == 0:
+            continue
+
+        score += max(0, 20 - min(path_lower.find(normalized_query), 20)) if normalized_query in path_lower else 0
+
+        results.append(
+            WebSearchHit(
+                path=path,
+                name=name,
+                type=item.get("type", "doc"),
+                snippet=_build_search_snippet(content, query),
+                score=score,
+            )
+        )
+
+    results.sort(key=lambda item: (-item.score, item.path))
+    return results[:limit]
+
+
+def _resolve_link_slug(
+    db: Session,
+    slug: str,
+) -> tuple[models.PublishedLink, models.Share]:
+    link = published_link_service.get_link_by_slug(db, slug)
+    if not link:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Published link not found",
+        )
+
+    share = db.get(models.Share, link.share_id)
+    if not share:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Share not found",
+        )
+
+    return link, share
+
+
+def _link_access_state(
+    db: Session,
+    request: Request,
+    link: models.PublishedLink,
+    share: models.Share,
+) -> tuple[bool, bool]:
+    if link.access_mode == models.LinkAccessMode.PUBLIC:
+        return True, False
+
+    if link.access_mode == models.LinkAccessMode.PROTECTED:
+        session_token = request.cookies.get("web_session")
+        if not session_token:
+            return False, False
+        try:
+            return WebSessionService.validate_web_session(session_token, share.id), False
+        except HTTPException:
+            return False, False
+
+    token = _request_bearer_token(request)
+    if not token:
+        return False, True
+
+    try:
+        user_id = _decode_web_user_id(token)
+    except HTTPException:
+        return False, True
+
+    return _user_can_access_share(db, share, user_id), True
+
+
+def _build_link_public_response(
+    db: Session,
+    request: Request,
+    link: models.PublishedLink,
+    share: models.Share,
+) -> WebSharePublic:
+    include_content, has_account_access = _link_access_state(db, request, link, share)
+    content = None
+    folder_items = None
+
+    if include_content:
+        content, folder_items = _extract_folder_file_content(share, link.target_path)
+
+    kind = "folder" if link.target_type == "folder" else "doc"
+    return WebSharePublic(
+        id=str(share.id),
+        published_link_id=str(link.id),
+        target_type=link.target_type,
+        target_id=link.target_id,
+        kind=kind,
+        path=link.target_path,
+        visibility=link.access_mode.value,
+        web_slug=link.slug,
+        web_noindex=link.noindex,
+        title=link.title,
+        description=link.description,
+        page_title=link.page_title,
+        theme_preset=link.theme_preset,
+        allow_comments=link.allow_comments and has_account_access,
+        page_metadata=link.page_metadata,
+        created_at=link.created_at,
+        updated_at=link.updated_at,
+        web_content=content if include_content and kind == "doc" else None,
+        web_content_updated_at=share.web_content_updated_at if include_content else None,
+        web_folder_items=folder_items if include_content and kind == "folder" else None,
+        web_doc_id=share.web_doc_id if include_content and kind == "doc" else None,
+    )
+
+
+@router.get("/discover")
+def discover_shares(
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """
+    List all discoverable web-published shares (public or protected).
+    Returns lightweight metadata for the home/landing page.
+    """
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        return []
+
+    stmt = select(models.Share).where(
+        models.Share.web_published == True,  # noqa: E712
+        models.Share.web_slug.isnot(None),
+        models.Share.visibility.in_([
+            models.ShareVisibility.PUBLIC,
+            models.ShareVisibility.PROTECTED,
+        ]),
+    ).order_by(models.Share.updated_at.desc())
+
+    shares = db.execute(stmt).scalars().all()
+    return [
+        {
+            "slug": s.web_slug,
+            "path": s.path,
+            "kind": s.kind.value if hasattr(s.kind, "value") else str(s.kind),
+            "visibility": s.visibility.value
+            if hasattr(s.visibility, "value")
+            else str(s.visibility),
+            "title": None,
+            "description": None,
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+        }
+        for s in shares
+    ]
 
 
 @router.get("/shares/{slug}", response_model=WebSharePublic)
@@ -171,6 +477,95 @@ def get_share_by_slug(
     )
 
 
+@router.get("/links/{slug}", response_model=WebSharePublic)
+def get_link_by_slug(
+    slug: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WebSharePublic:
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Web publishing is not enabled on this server",
+        )
+
+    link, share = _resolve_link_slug(db, slug)
+    return _build_link_public_response(db, request, link, share)
+
+
+@router.post("/links/{slug}/auth", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
+def authenticate_protected_link(
+    request: Request,
+    slug: str,
+    payload: WebShareAuthRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict:
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Web publishing is not enabled on this server",
+        )
+
+    link, share = _resolve_link_slug(db, slug)
+    if link.access_mode != models.LinkAccessMode.PROTECTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This endpoint is only for protected links",
+        )
+
+    if not link.password_hash or not security.verify_password(payload.password, link.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid password",
+        )
+
+    max_age = _get_web_session_max_age(settings)
+    session_token = WebSessionService.create_web_session(share.id, hours=max_age // 3600)
+    response.set_cookie(
+        key="web_session",
+        value=session_token,
+        max_age=max_age,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        path="/",
+    )
+
+    return {"message": "Authentication successful", "share_id": str(share.id)}
+
+
+@router.get("/links/{slug}/validate", response_model=WebSessionValidation)
+def validate_link_session(
+    slug: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WebSessionValidation:
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Web publishing is not enabled on this server",
+        )
+
+    link, share = _resolve_link_slug(db, slug)
+    if link.access_mode != models.LinkAccessMode.PROTECTED:
+        return WebSessionValidation(valid=True, share_id=str(share.id))
+
+    session_token = request.cookies.get("web_session")
+    if not session_token:
+        return WebSessionValidation(valid=False, share_id=None)
+
+    try:
+        is_valid = WebSessionService.validate_web_session(session_token, share.id)
+        return WebSessionValidation(valid=is_valid, share_id=str(share.id) if is_valid else None)
+    except HTTPException:
+        return WebSessionValidation(valid=False, share_id=None)
+
+
 @router.post("/shares/{slug}/auth", status_code=status.HTTP_200_OK)
 @limiter.limit("5/minute")  # Max 5 password attempts per minute per IP
 def authenticate_protected_share(
@@ -226,15 +621,16 @@ def authenticate_protected_share(
             detail="Invalid password",
         )
 
-    # Create session token (24h expiry)
-    session_token = WebSessionService.create_web_session(share.id, hours=24)
+    # Create session token aligned with long-lived web auth.
+    max_age = _get_web_session_max_age(settings)
+    session_token = WebSessionService.create_web_session(share.id, hours=max_age // 3600)
 
     # Set secure cookie
     # Note: In production, Secure flag is set automatically via HTTPS
     response.set_cookie(
         key="web_session",
         value=session_token,
-        max_age=86400,  # 24 hours in seconds
+        max_age=max_age,
         httponly=True,
         secure=True,  # Only send over HTTPS
         samesite="strict",  # CSRF protection
@@ -398,8 +794,58 @@ def get_web_relay_token(
     )
 
 
+@router.get("/links/{slug}/token", response_model=WebRelayTokenResponse)
+def get_link_relay_token(
+    slug: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WebRelayTokenResponse:
+    from datetime import timedelta
+
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Web publishing is not enabled on this server",
+        )
+
+    link, share = _resolve_link_slug(db, slug)
+    include_content, _has_account_access = _link_access_state(db, request, link, share)
+    if not include_content:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authentication required for real-time sync",
+        )
+
+    if not share.web_doc_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Real-time sync not configured for this share. Sync from Obsidian plugin first.",
+        )
+
+    expires_in = timedelta(minutes=settings.relay_token_ttl_minutes)
+    expires_at = security.utcnow() + expires_in
+
+    private_key = request.app.state.relay_private_key
+    key_id = request.app.state.relay_key_id
+    token = security.create_relay_token(
+        private_key=private_key,
+        key_id=key_id,
+        doc_id=share.web_doc_id,
+        mode="read",
+        expires_minutes=settings.relay_token_ttl_minutes,
+    )
+
+    return WebRelayTokenResponse(
+        relay_url=str(settings.relay_public_url).rstrip("/"),
+        token=token,
+        doc_id=share.web_doc_id,
+        expires_at=expires_at,
+    )
+
+
 @router.post("/shares/{slug}/files", status_code=status.HTTP_200_OK)
-@limiter.limit("30/minute")  # Rate limit for content sync
+@limiter.limit("300/minute")
 def sync_folder_file_content(
     request: Request,
     slug: str,
@@ -530,64 +976,7 @@ def get_folder_file_content(
             detail="This endpoint is only for folder shares",
         )
 
-    # Check access based on visibility
-    if share.visibility == models.ShareVisibility.PROTECTED:
-        session_token = request.cookies.get("web_session")
-        if not session_token:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Authentication required for protected share",
-            )
-        if not WebSessionService.validate_web_session(session_token, share.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid or expired session",
-            )
-
-    if share.visibility == models.ShareVisibility.PRIVATE:
-        # Validate user JWT token
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Private shares require user authentication",
-            )
-
-        # Validate JWT and check user has access to share
-        token = auth_header.split(" ")[1]
-        try:
-            from uuid import UUID
-
-            from app.core import security as sec_module
-
-            payload = sec_module.decode_access_token(token)
-            user_id_str = payload.get("sub")
-            if not user_id_str:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Invalid token",
-                )
-
-            user_id = UUID(user_id_str)
-            # Check if user is owner or member of the share
-            if share.owner_user_id != user_id:
-                member_stmt = select(models.ShareMember).where(
-                    models.ShareMember.share_id == share.id,
-                    models.ShareMember.user_id == user_id,
-                )
-                member = db.execute(member_stmt).scalar_one_or_none()
-                if not member:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="You do not have access to this share",
-                    )
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid or expired token",
-            )
+    _ensure_share_content_access(db, request, share)
 
     # Find file in folder items
     folder_items = share.web_folder_items or []
@@ -598,12 +987,150 @@ def get_folder_file_content(
                 "name": item.get("name"),
                 "type": item.get("type"),
                 "content": item.get("content", ""),
+                "has_content": _folder_item_has_content(item),
             }
 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="File not found in folder share",
     )
+
+
+@router.get("/shares/{slug}/search", response_model=list[WebSearchHit])
+def search_share_content(
+    slug: str,
+    q: str = Query(..., min_length=1, description="Full-text query"),
+    limit: int = Query(default=8, ge=1, le=25),
+    request: Request = None,
+    db: Session = Depends(get_db),
+) -> list[WebSearchHit]:
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Web publishing is not enabled on this server",
+        )
+
+    stmt = select(models.Share).where(
+        models.Share.web_slug == slug,
+        models.Share.web_published == True,  # noqa: E712
+    )
+    share = db.execute(stmt).scalar_one_or_none()
+
+    if not share:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Share not found or not published",
+        )
+
+    _ensure_share_content_access(db, request, share)
+
+    if share.kind == models.ShareKind.DOC:
+        return _search_folder_items(
+            [
+                {
+                    "path": share.path,
+                    "name": share.path.split("/")[-1],
+                    "type": "doc",
+                    "content": share.web_content or "",
+                }
+            ],
+            q,
+            limit,
+        )
+
+    return _search_folder_items(share.web_folder_items or [], q, limit)
+
+
+@router.get("/links/{slug}/files", response_model=dict)
+def get_link_folder_file_content(
+    slug: str,
+    path: str = Query(..., description="File path within linked folder"),
+    request: Request = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Web publishing is not enabled on this server",
+        )
+
+    link, share = _resolve_link_slug(db, slug)
+    include_content, _has_account_access = _link_access_state(db, request, link, share)
+    if not include_content:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authentication required for linked content",
+        )
+
+    folder_items = share.web_folder_items or []
+    target_path = link.target_path
+    for item in folder_items:
+        item_path = item.get("path")
+        if link.target_type == "doc":
+            if item_path == target_path or path == target_path:
+                return {
+                    "path": item_path,
+                    "name": item.get("name"),
+                    "type": item.get("type"),
+                    "content": item.get("content", ""),
+                    "has_content": _folder_item_has_content(item),
+                }
+        elif item_path == path:
+            return {
+                "path": path,
+                "name": item.get("name"),
+                "type": item.get("type"),
+                "content": item.get("content", ""),
+                "has_content": _folder_item_has_content(item),
+            }
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="File not found in published link",
+    )
+
+
+@router.get("/links/{slug}/search", response_model=list[WebSearchHit])
+def search_link_content(
+    slug: str,
+    q: str = Query(..., min_length=1, description="Full-text query"),
+    limit: int = Query(default=8, ge=1, le=25),
+    request: Request = None,
+    db: Session = Depends(get_db),
+) -> list[WebSearchHit]:
+    settings = get_settings()
+    if not settings.web_publish_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Web publishing is not enabled on this server",
+        )
+
+    link, share = _resolve_link_slug(db, slug)
+    include_content, _has_account_access = _link_access_state(db, request, link, share)
+    if not include_content:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authentication required for linked content",
+        )
+
+    if link.target_type == "doc":
+        content, _folder_items = _extract_folder_file_content(share, link.target_path)
+        return _search_folder_items(
+            [
+                {
+                    "path": link.target_path,
+                    "name": link.target_path.split("/")[-1],
+                    "type": "doc",
+                    "content": content or "",
+                }
+            ],
+            q,
+            limit,
+        )
+
+    return _search_folder_items(share.web_folder_items or [], q, limit)
 
 
 @router.put("/shares/{slug}/content", status_code=status.HTTP_200_OK)
@@ -857,11 +1384,11 @@ def upload_web_asset(
             detail="Invalid base64 data",
         )
 
-    # Check max size (5MB)
-    if len(binary_data) > 5 * 1024 * 1024:
+    # Check max size (20MB)
+    if len(binary_data) > 20 * 1024 * 1024:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Asset too large. Max size: 5MB",
+            detail="Asset too large. Max size: 20MB",
         )
 
     # Find share

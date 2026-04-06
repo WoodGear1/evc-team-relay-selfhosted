@@ -99,6 +99,13 @@ class Settings(BaseSettings):
         description="Block relay token issuance for users with unverified email",
     )
 
+    # MinIO / S3 object storage for web assets
+    minio_endpoint: str = Field(default="minio:9000", description="MinIO endpoint (host:port)")
+    minio_access_key: str = Field(default="minioadmin", description="MinIO access key")
+    minio_secret_key: str = Field(default="minioadmin", description="MinIO secret key")
+    minio_bucket: str = Field(default="relay", description="MinIO bucket name")
+    minio_secure: bool = Field(default=False, description="Use HTTPS for MinIO")
+
     # Web publishing settings
     web_publish_domain: str | None = Field(
         default=None,

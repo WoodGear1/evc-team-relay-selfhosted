@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+	const branding = $derived($page.data?.serverInfo?.branding);
 
 	let email = $state('');
 	let password = $state('');
@@ -69,7 +71,7 @@
 </script>
 
 <svelte:head>
-	<title>Sign In - Relay</title>
+	<title>Sign In - {branding?.name || 'Docs'}</title>
 </svelte:head>
 
 <div class="login-container">
@@ -80,7 +82,7 @@
 
 		{#if isPasswordLogin}
 			<p class="login-description">
-				Sign in with your Relay account to open private or members-only documents.
+				Sign in with your account to open private or members-only documents.
 			</p>
 
 			{#if data.error}

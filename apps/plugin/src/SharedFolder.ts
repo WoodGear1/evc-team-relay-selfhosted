@@ -483,10 +483,15 @@ export class SharedFolder extends HasProvider {
 		const inFolder = this.checkPath(tfile.path);
 		const vpath = this.getVirtualPath(tfile.path);
 		const isSupportedFileType = this.syncStore.canSync(vpath);
+		const isAlwaysSyncedAsset = this.syncStore.isAlwaysSyncedAsset(vpath);
 
 		// For folders, we only need to check if the sync store supports them
 		// Extension preferences don't apply to folders
 		if (tfile instanceof TFolder) {
+			return inFolder && isSupportedFileType;
+		}
+
+		if (isAlwaysSyncedAsset) {
 			return inFolder && isSupportedFileType;
 		}
 
@@ -965,7 +970,11 @@ export class SharedFolder extends HasProvider {
 	) {
 		syncStore.forEach((meta, path) => {
 			this._assertNamespacing(path);
-			if (types.contains(meta.type)) {
+			const shouldSyncByType =
+				types.contains(meta.type) ||
+				(meta.type === SyncType.Image &&
+					this.syncStore.isAlwaysSyncedAsset(path));
+			if (shouldSyncByType) {
 				this._assertNamespacing(path);
 				ops.push(
 					this.applyRemoteState(meta.id, path, syncStore.remoteIds, diffLog),
@@ -1099,8 +1108,19 @@ export class SharedFolder extends HasProvider {
 	}
 
 	mkdir(path: string): Promise<void> {
-		const vaultPath = join(this.path, path);
-		return this.vault.adapter.mkdir(normalizePath(vaultPath));
+		const normalizedPath = normalizePath(path);
+		if (!normalizedPath || normalizedPath === ".") {
+			return Promise.resolve();
+		}
+		const parts = normalizedPath.split("/").filter(Boolean);
+		return parts.reduce<Promise<void>>(async (previous, part, index) => {
+			await previous;
+			const relativePath = parts.slice(0, index + 1).join("/");
+			const vaultPath = normalizePath(join(this.path, relativePath));
+			if (!(await this.vault.adapter.exists(vaultPath))) {
+				await this.vault.adapter.mkdir(vaultPath);
+			}
+		}, Promise.resolve());
 	}
 
 	checkPath(path: string): boolean {

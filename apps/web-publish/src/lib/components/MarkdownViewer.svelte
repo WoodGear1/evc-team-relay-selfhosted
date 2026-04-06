@@ -3,6 +3,7 @@
 	import { browser } from '$app/environment';
 	import { renderMarkdown } from '$lib/markdown';
 	import { getResolvedThemeFromDom, type ResolvedTheme } from '$lib/theme';
+	import ImageLightbox from './ImageLightbox.svelte';
 
 	interface Props {
 		content: string;
@@ -18,6 +19,9 @@
 	let contentEl: HTMLDivElement | undefined = $state();
 	let currentTheme = $state<ResolvedTheme>(browser ? getResolvedThemeFromDom() : 'light');
 	let themeObserver: MutationObserver | null = null;
+
+	let lightboxSrc = $state<string | null>(null);
+	let lightboxAlt = $state('');
 
 	const mermaidThemeConfig: Record<
 		ResolvedTheme,
@@ -110,29 +114,28 @@
 			const target = e.target as HTMLElement;
 
 			// Handle copy button clicks
-			if (target.classList.contains('code-copy-btn')) {
-				const container = target.closest('.code-block-container');
+			const copyBtn = target.closest('.code-copy-btn') as HTMLElement | null;
+			if (copyBtn) {
+				const container = copyBtn.closest('.code-block-container');
 				if (!container) return;
 
 				const codeEl = container.querySelector('code');
 				if (!codeEl) return;
 
 				const codeText = codeEl.textContent || '';
+				const copySvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+				const checkSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
 				try {
 					await navigator.clipboard.writeText(codeText);
-					target.textContent = 'Copied!';
-					target.classList.add('copied');
+					copyBtn.innerHTML = checkSvg;
+					copyBtn.classList.add('copied');
 					setTimeout(() => {
-						target.textContent = 'Copy';
-						target.classList.remove('copied');
+						copyBtn.innerHTML = copySvg;
+						copyBtn.classList.remove('copied');
 					}, 2000);
 				} catch (err) {
 					console.warn('[MarkdownViewer] Failed to copy code:', err);
-					target.textContent = 'Failed';
-					setTimeout(() => {
-						target.textContent = 'Copy';
-					}, 2000);
 				}
 				return;
 			}
@@ -141,6 +144,31 @@
 			const wikilink = target.closest('[data-wikilink-disabled]') as HTMLElement | null;
 			if (wikilink) {
 				e.preventDefault();
+			}
+
+			// Hashtag click → populate topbar search
+			const tagChip = target.closest('.tag-chip') as HTMLElement | null;
+			if (tagChip) {
+				e.preventDefault();
+				const tag = tagChip.getAttribute('data-tag');
+				if (tag) {
+					const searchInput = document.querySelector<HTMLInputElement>('.search-input-wrap input[type="search"]');
+					if (searchInput) {
+						searchInput.value = `#${tag}`;
+						searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+						searchInput.focus();
+					}
+				}
+			}
+
+			// Open image lightbox on click (any image in markdown content)
+			const imgEl = target.tagName === 'IMG' ? target : target.closest('img');
+			if (imgEl && imgEl instanceof HTMLImageElement && imgEl.src) {
+				e.preventDefault();
+				e.stopPropagation();
+				lightboxSrc = imgEl.src;
+				lightboxAlt = imgEl.alt || '';
+				return;
 			}
 		});
 	}
@@ -167,15 +195,15 @@
 	async function renderContent() {
 		try {
 			renderedHtml = await renderMarkdown(content, { slug, folderItems });
-			await tick();
-			await initMermaid();
-			attachDelegatedHandlers();
 		} catch (error) {
 			console.error('Failed to render markdown:', error);
 			renderedHtml = '<p class="error">Failed to render document</p>';
 		} finally {
 			isRendering = false;
 		}
+		await tick();
+		await initMermaid();
+		attachDelegatedHandlers();
 	}
 
 	onMount(() => {
@@ -219,6 +247,10 @@
 	<div class="markdown-content {className}" bind:this={contentEl}>
 		{@html renderedHtml}
 	</div>
+{/if}
+
+{#if lightboxSrc}
+	<ImageLightbox src={lightboxSrc} alt={lightboxAlt} onclose={() => { lightboxSrc = null; }} />
 {/if}
 
 <style>
@@ -294,8 +326,6 @@
 		margin-top: 1.5rem;
 		margin-bottom: 1rem;
 		font-weight: 600;
-		border-bottom: 1px solid var(--border);
-		padding-bottom: 0.3rem;
 		color: var(--foreground);
 	}
 
@@ -350,11 +380,11 @@
 
 	.markdown-content :global(pre) {
 		background-color: hsl(var(--code-bg));
-		padding: 1rem;
+		padding: 0.75rem 1rem;
 		border-radius: 8px;
 		overflow-x: auto;
 		margin-bottom: 1rem;
-		box-shadow: 0 2px 8px var(--shadow);
+		border: 1px solid hsl(var(--border) / 0.3);
 		position: relative;
 	}
 
@@ -362,16 +392,27 @@
 		background-color: transparent;
 		padding: 0;
 		color: hsl(var(--code-fg));
-		font-size: 0.875rem;
-		line-height: 1.5;
+		font-size: 0.8rem;
+		line-height: 1.15;
 	}
 
 	.markdown-content :global(blockquote) {
-		border-left: 4px solid hsl(var(--border));
-		padding-left: 1rem;
-		margin-left: 0;
-		color: hsl(var(--muted-foreground));
-		font-style: italic;
+		position: relative;
+		border-left: 3px solid hsl(var(--primary) / 0.5);
+		border-radius: 0 8px 8px 0;
+		padding: 0.5rem 0.85rem 0.5rem 0.85rem;
+		margin: 0.75rem 0;
+		color: hsl(var(--foreground) / 0.85);
+		font-style: normal;
+		background: hsl(var(--muted) / 0.35);
+	}
+
+	.markdown-content :global(blockquote p:first-child) {
+		margin-top: 0;
+	}
+
+	.markdown-content :global(blockquote p:last-child) {
+		margin-bottom: 0;
 	}
 
 	.markdown-content :global(ul),
@@ -385,33 +426,85 @@
 	}
 
 	.markdown-content :global(table) {
-		border-collapse: collapse;
+		border-collapse: separate;
+		border-spacing: 0;
 		width: 100%;
-		margin-bottom: 1rem;
+		margin-bottom: 1.25rem;
+		font-size: 0.875rem;
+		border-radius: 8px;
+		overflow: hidden;
+		border: 1px solid hsl(var(--border) / 0.35);
 	}
 
 	.markdown-content :global(th),
 	.markdown-content :global(td) {
-		border: 1px solid hsl(var(--border));
-		padding: 0.5rem;
+		padding: 0.55rem 0.75rem;
 		text-align: left;
+		border-bottom: 1px solid hsl(var(--border) / 0.25);
+		border-right: 1px solid hsl(var(--border) / 0.15);
+	}
+
+	.markdown-content :global(th:last-child),
+	.markdown-content :global(td:last-child) {
+		border-right: none;
+	}
+
+	.markdown-content :global(tbody tr:last-child td) {
+		border-bottom: none;
 	}
 
 	.markdown-content :global(th) {
-		background-color: hsl(var(--secondary));
+		background-color: hsl(var(--muted) / 0.5);
 		font-weight: 600;
-		color: hsl(var(--secondary-foreground));
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		color: hsl(var(--muted-foreground));
+	}
+
+	.markdown-content :global(tbody tr:nth-child(even)) {
+		background-color: hsl(var(--muted) / 0.12);
+	}
+
+	.markdown-content :global(tbody tr) {
+		transition: background-color 0.15s ease;
+	}
+
+	.markdown-content :global(tbody tr:hover) {
+		background-color: hsl(var(--primary) / 0.04);
 	}
 
 	.markdown-content :global(img) {
 		max-width: 100%;
 		height: auto;
+		cursor: zoom-in;
 	}
 
 	.markdown-content :global(hr) {
 		border: none;
 		border-top: 1px solid hsl(var(--border));
 		margin: 2rem 0;
+	}
+
+	.markdown-content :global(center) {
+		display: block;
+		text-align: center;
+		margin: 0.5rem 0;
+	}
+
+	.markdown-content :global(u) {
+		text-decoration: underline;
+	}
+
+	.markdown-content :global(kbd) {
+		display: inline-block;
+		padding: 0.15em 0.4em;
+		font-size: 0.85em;
+		font-family: var(--font-mono);
+		background-color: hsl(var(--muted));
+		border: 1px solid hsl(var(--border));
+		border-radius: 3px;
+		box-shadow: inset 0 -1px 0 hsl(var(--border));
 	}
 
 	.markdown-content :global(.error) {
@@ -436,24 +529,140 @@
 	}
 
 	/* ================================
-	   Wikilinks
+	   Wikilink Chips
 	   ================================ */
-	.markdown-content :global(.obsidian-wikilink) {
-		color: hsl(var(--accent));
+	.markdown-content :global(.wikilink-chip) {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 0.15em 0.55em 0.15em 0.4em;
+		font-size: 0.875em;
+		font-weight: 500;
+		line-height: 1.5;
+		border-radius: 6px;
 		text-decoration: none;
-		border-bottom: 1px dashed hsl(var(--accent));
-		cursor: default;
-		transition: opacity 0.15s;
+		transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+		vertical-align: baseline;
 	}
 
-	.markdown-content :global(.obsidian-wikilink:hover) {
-		opacity: 0.8;
-		text-decoration: none;
+	.markdown-content :global(.wikilink-chip-icon) {
+		flex-shrink: 0;
+		opacity: 0.55;
+		transition: opacity 0.2s ease;
 	}
 
-	.markdown-content :global(.obsidian-wikilink-heading) {
+	.markdown-content :global(.wikilink-resolved) {
+		color: hsl(var(--primary));
+		background: hsl(var(--primary) / 0.08);
+		border: 1px solid hsl(var(--primary) / 0.15);
 		cursor: pointer;
-		border-bottom-style: solid;
+	}
+
+	.markdown-content :global(.wikilink-resolved:hover) {
+		background: hsl(var(--primary) / 0.14);
+		border-color: hsl(var(--primary) / 0.3);
+		box-shadow: 0 2px 8px hsl(var(--primary) / 0.1);
+		text-decoration: none;
+	}
+
+	.markdown-content :global(.wikilink-resolved:hover) :global(.wikilink-chip-icon) {
+		opacity: 1;
+	}
+
+	.markdown-content :global(.wikilink-unresolved) {
+		color: hsl(var(--muted-foreground));
+		background: hsl(var(--muted) / 0.45);
+		border: 1px dashed hsl(var(--border) / 0.6);
+		cursor: default;
+	}
+
+	/* ================================
+	   Document Link Chips  [text](file.md)
+	   ================================ */
+	.markdown-content :global(.doc-link-chip) {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 0.15em 0.55em 0.15em 0.4em;
+		margin: 0.15em 0.1em;
+		font-size: 0.875em;
+		font-weight: 500;
+		line-height: 1.5;
+		border-radius: 5px;
+		color: hsl(var(--primary));
+		background: hsl(var(--primary) / 0.07);
+		border: 1px solid hsl(var(--primary) / 0.12);
+		text-decoration: none;
+		cursor: pointer;
+		transition: all 0.15s ease;
+		vertical-align: baseline;
+	}
+
+	.markdown-content :global(.doc-link-chip:hover) {
+		background: hsl(var(--primary) / 0.13);
+		border-color: hsl(var(--primary) / 0.25);
+		text-decoration: none;
+	}
+
+	.markdown-content :global(.doc-link-unresolved) {
+		color: hsl(var(--muted-foreground));
+		background: hsl(var(--muted) / 0.4);
+		border: 1px dashed hsl(var(--border) / 0.5);
+		cursor: default;
+	}
+
+	.markdown-content :global(.chip-icon) {
+		flex-shrink: 0;
+		opacity: 0.5;
+	}
+
+	.markdown-content :global(.doc-link-chip:hover .chip-icon) {
+		opacity: 0.8;
+	}
+
+	/* ================================
+	   External Link Chips  [text](https://...)
+	   ================================ */
+	.markdown-content :global(.ext-link-chip) {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 0.15em 0.5em 0.15em 0.4em;
+		margin: 0.15em 0.1em;
+		font-size: 0.875em;
+		font-weight: 500;
+		line-height: 1.5;
+		border-radius: 5px;
+		color: hsl(var(--foreground));
+		background: hsl(var(--muted) / 0.45);
+		border: 1px solid hsl(var(--border) / 0.3);
+		text-decoration: none;
+		transition: all 0.15s ease;
+		vertical-align: baseline;
+	}
+
+	.markdown-content :global(.ext-link-chip:hover) {
+		background: hsl(var(--primary) / 0.07);
+		border-color: hsl(var(--primary) / 0.2);
+		color: hsl(var(--primary));
+		text-decoration: none;
+	}
+
+	.markdown-content :global(.ext-link-favicon) {
+		flex-shrink: 0;
+		width: 14px;
+		height: 14px;
+		border-radius: 2px;
+	}
+
+	.markdown-content :global(.ext-link-arrow) {
+		flex-shrink: 0;
+		opacity: 0.35;
+		margin-left: 1px;
+	}
+
+	.markdown-content :global(.ext-link-chip:hover .ext-link-arrow) {
+		opacity: 0.7;
 	}
 
 	/* ================================
@@ -483,43 +692,66 @@
 	}
 
 	/* ================================
-	   Callouts
+	   Callouts — Obsidian-faithful single-block design
 	   ================================ */
 	.markdown-content :global(.callout) {
+		--callout-accent: 59, 130, 246;
 		margin: 1rem 0;
-		border-radius: 6px;
-		overflow: hidden;
-		border: 1px solid;
+		padding: 0;
+		border: 1px solid rgba(var(--callout-accent), 0.18);
+		border-left: 3px solid rgb(var(--callout-accent));
+		border-radius: 8px;
+		background: rgba(var(--callout-accent), 0.04);
+		color: hsl(var(--foreground));
 		font-style: normal;
+		overflow: hidden;
 	}
 
 	.markdown-content :global(.callout-header) {
-		padding: 0.5rem 0.75rem;
-		font-weight: 500;
+		padding: 0.55rem 0.85rem;
+		background: rgba(var(--callout-accent), 0.06);
 	}
 
 	.markdown-content :global(.callout-title) {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 7px;
+		color: rgb(var(--callout-accent));
 	}
 
 	.markdown-content :global(.callout-icon) {
 		flex-shrink: 0;
-		font-size: 1rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 18px;
+		height: 18px;
+		color: inherit;
+	}
+
+	.markdown-content :global(.callout-icon svg) {
+		width: 18px;
+		height: 18px;
 	}
 
 	.markdown-content :global(.callout-title-text) {
 		font-weight: 600;
-		font-size: 0.9375rem;
+		font-size: 0.9rem;
+		line-height: 1.4;
+	}
+
+	.markdown-content :global(.callout-fold-icon) {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
 	}
 
 	.markdown-content :global(.callout-fold-icon)::after {
 		content: '\25B6';
-		font-size: 0.625rem;
+		font-size: 0.6rem;
 		display: inline-block;
-		transition: transform 0.2s;
-		margin-left: 0.25rem;
+		transition: transform 0.2s ease;
+		opacity: 0.6;
 	}
 
 	.markdown-content :global(details.callout[open]) :global(.callout-fold-icon)::after {
@@ -541,166 +773,65 @@
 	}
 
 	.markdown-content :global(.callout-content) {
-		padding: 0.5rem 0.75rem 0.75rem;
-		font-size: 0.9375rem;
+		padding: 0.5rem 0.85rem 0.6rem;
+		font-size: 0.9rem;
 		line-height: 1.6;
-		border-top: 1px solid;
-		border-color: inherit;
+		color: hsl(var(--foreground));
+	}
+
+	.markdown-content :global(.callout-content > p:first-child) {
+		margin-top: 0;
 	}
 
 	.markdown-content :global(.callout-content > p:last-child) {
 		margin-bottom: 0;
 	}
 
-	/* Callout color: Blue (note, info, todo) */
-	.markdown-content :global(.callout-blue) {
-		background-color: rgba(59, 130, 246, 0.08);
-		border-color: rgba(59, 130, 246, 0.3);
-		color: hsl(var(--foreground));
+	.markdown-content :global(.callout-content > :last-child) {
+		margin-bottom: 0;
 	}
 
-	.markdown-content :global(.callout-blue) :global(.callout-header) {
-		color: #2563eb;
+	.markdown-content :global(.callout) :global(.katex-display) {
+		background: transparent;
+		border: none;
+		padding: 0.4rem 0;
 	}
 
-	:global(.dark) .markdown-content :global(.callout-blue) :global(.callout-header) {
-		color: #60a5fa;
+	.markdown-content :global(.callout) :global(pre) {
+		border: none;
+		box-shadow: none;
+		margin: 0.5rem 0;
 	}
 
-	/* Callout color: Teal (abstract, summary, tldr) */
-	.markdown-content :global(.callout-teal) {
-		background-color: rgba(20, 184, 166, 0.08);
-		border-color: rgba(20, 184, 166, 0.3);
-		color: hsl(var(--foreground));
+	.markdown-content :global(.callout) :global(ul),
+	.markdown-content :global(.callout) :global(ol) {
+		margin: 0.25rem 0;
 	}
 
-	.markdown-content :global(.callout-teal) :global(.callout-header) {
-		color: #0d9488;
-	}
+	/* ---- Callout color palettes ---- */
+	/* Each variant just sets --callout-accent (R, G, B) */
 
-	:global(.dark) .markdown-content :global(.callout-teal) :global(.callout-header) {
-		color: #2dd4bf;
-	}
+	.markdown-content :global(.callout-blue)     { --callout-accent: 59, 130, 246; }
+	.markdown-content :global(.callout-teal)     { --callout-accent: 20, 184, 166; }
+	.markdown-content :global(.callout-cyan)     { --callout-accent: 6, 182, 212; }
+	.markdown-content :global(.callout-green)    { --callout-accent: 34, 197, 94; }
+	.markdown-content :global(.callout-yellow)   { --callout-accent: 202, 138, 4; }
+	.markdown-content :global(.callout-orange)   { --callout-accent: 249, 115, 22; }
+	.markdown-content :global(.callout-red)      { --callout-accent: 239, 68, 68; }
+	.markdown-content :global(.callout-red-dark) { --callout-accent: 185, 28, 28; }
+	.markdown-content :global(.callout-purple)   { --callout-accent: 139, 92, 246; }
+	.markdown-content :global(.callout-gray)     { --callout-accent: 142, 142, 160; }
 
-	/* Callout color: Cyan (tip, hint, important) */
-	.markdown-content :global(.callout-cyan) {
-		background-color: rgba(6, 182, 212, 0.08);
-		border-color: rgba(6, 182, 212, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-cyan) :global(.callout-header) {
-		color: #0891b2;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-cyan) :global(.callout-header) {
-		color: #22d3ee;
-	}
-
-	/* Callout color: Green (success, check, done) */
-	.markdown-content :global(.callout-green) {
-		background-color: rgba(34, 197, 94, 0.08);
-		border-color: rgba(34, 197, 94, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-green) :global(.callout-header) {
-		color: #16a34a;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-green) :global(.callout-header) {
-		color: #4ade80;
-	}
-
-	/* Callout color: Yellow (question, help, faq) */
-	.markdown-content :global(.callout-yellow) {
-		background-color: rgba(234, 179, 8, 0.08);
-		border-color: rgba(234, 179, 8, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-yellow) :global(.callout-header) {
-		color: #ca8a04;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-yellow) :global(.callout-header) {
-		color: #facc15;
-	}
-
-	/* Callout color: Orange (warning, caution, attention) */
-	.markdown-content :global(.callout-orange) {
-		background-color: rgba(249, 115, 22, 0.08);
-		border-color: rgba(249, 115, 22, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-orange) :global(.callout-header) {
-		color: #ea580c;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-orange) :global(.callout-header) {
-		color: #fb923c;
-	}
-
-	/* Callout color: Red (failure, fail, missing, bug) */
-	.markdown-content :global(.callout-red) {
-		background-color: rgba(239, 68, 68, 0.08);
-		border-color: rgba(239, 68, 68, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-red) :global(.callout-header) {
-		color: #dc2626;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-red) :global(.callout-header) {
-		color: #f87171;
-	}
-
-	/* Callout color: Red Dark (danger, error) */
-	.markdown-content :global(.callout-red-dark) {
-		background-color: rgba(185, 28, 28, 0.08);
-		border-color: rgba(185, 28, 28, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-red-dark) :global(.callout-header) {
-		color: #b91c1c;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-red-dark) :global(.callout-header) {
-		color: #fca5a5;
-	}
-
-	/* Callout color: Purple (example) */
-	.markdown-content :global(.callout-purple) {
-		background-color: rgba(139, 92, 246, 0.08);
-		border-color: rgba(139, 92, 246, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-purple) :global(.callout-header) {
-		color: #7c3aed;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-purple) :global(.callout-header) {
-		color: #a78bfa;
-	}
-
-	/* Callout color: Gray (quote, cite) */
-	.markdown-content :global(.callout-gray) {
-		background-color: rgba(107, 114, 128, 0.08);
-		border-color: rgba(107, 114, 128, 0.3);
-		color: hsl(var(--foreground));
-	}
-
-	.markdown-content :global(.callout-gray) :global(.callout-header) {
-		color: #4b5563;
-	}
-
-	:global(.dark) .markdown-content :global(.callout-gray) :global(.callout-header) {
-		color: #9ca3af;
-	}
+	:global(.dark) .markdown-content :global(.callout-blue)     { --callout-accent: 96, 165, 250; }
+	:global(.dark) .markdown-content :global(.callout-teal)     { --callout-accent: 45, 212, 191; }
+	:global(.dark) .markdown-content :global(.callout-cyan)     { --callout-accent: 34, 211, 238; }
+	:global(.dark) .markdown-content :global(.callout-green)    { --callout-accent: 74, 222, 128; }
+	:global(.dark) .markdown-content :global(.callout-yellow)   { --callout-accent: 250, 204, 21; }
+	:global(.dark) .markdown-content :global(.callout-orange)   { --callout-accent: 251, 146, 60; }
+	:global(.dark) .markdown-content :global(.callout-red)      { --callout-accent: 248, 113, 113; }
+	:global(.dark) .markdown-content :global(.callout-red-dark) { --callout-accent: 252, 165, 165; }
+	:global(.dark) .markdown-content :global(.callout-purple)   { --callout-accent: 167, 139, 250; }
+	:global(.dark) .markdown-content :global(.callout-gray)     { --callout-accent: 156, 163, 175; }
 
 	/* ================================
 	   KaTeX / Math
@@ -711,20 +842,36 @@
 		text-align: center;
 		overflow-x: auto;
 		overflow-y: hidden;
-		padding: 0.5rem 0;
+		padding: 0.75rem 1rem;
+		background: hsl(var(--muted) / 0.45);
+		border-radius: 6px;
+		border: 1px solid hsl(var(--border) / 0.3);
+	}
+
+	.markdown-content :global(.katex-display) > :global(.katex) {
+		font-size: 1.05em;
 	}
 
 	.markdown-content :global(.katex) {
-		font-size: 1.1em;
+		font-size: 0.95em;
 	}
 
 	.markdown-content :global(.katex-error) {
 		color: hsl(var(--destructive));
 		font-family: var(--font-mono);
-		font-size: 0.9em;
+		font-size: 0.85em;
 		background-color: rgba(239, 68, 68, 0.08);
 		padding: 0.2em 0.4em;
 		border-radius: 3px;
+	}
+
+	.markdown-content :global(.katex-error.katex-display) {
+		display: block;
+		text-align: center;
+		padding: 0.75rem 1rem;
+		background: rgba(239, 68, 68, 0.05);
+		border: 1px solid rgba(239, 68, 68, 0.15);
+		border-radius: 6px;
 	}
 
 	/* ================================
@@ -844,7 +991,6 @@
 		.markdown-content :global(table) {
 			display: block;
 			overflow-x: auto;
-			white-space: nowrap;
 		}
 
 		.markdown-content :global(pre) {
@@ -864,7 +1010,17 @@
 		}
 
 		.markdown-content :global(.katex-display) {
+			padding: 0.5rem 0.75rem;
+		}
+
+		.markdown-content :global(.katex-display) > :global(.katex) {
 			font-size: 0.95em;
+		}
+
+		.markdown-content :global(.line-num) {
+			width: 2em;
+			margin-right: 0.5em;
+			padding-right: 0.5em;
 		}
 	}
 
@@ -882,23 +1038,41 @@
 	}
 
 	/* ================================
-	   Phase B: Tags
+	   Tag Chips
 	   ================================ */
-	.markdown-content :global(.obsidian-tag) {
-		display: inline-block;
-		padding: 0.125rem 0.5rem;
-		font-size: 0.8125rem;
-		font-weight: 500;
-		background-color: hsl(var(--accent) / 0.15);
+	.markdown-content :global(.tag-chip) {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.1em 0.55em;
+		font-size: 0.8125em;
+		font-weight: 600;
+		line-height: 1.5;
+		border-radius: 999px;
+		background: linear-gradient(135deg, hsl(var(--accent) / 0.12), hsl(var(--accent) / 0.06));
 		color: hsl(var(--accent-foreground));
-		border-radius: 0.375rem;
-		border: 1px solid hsl(var(--accent) / 0.3);
-		transition: background-color 0.15s, border-color 0.15s;
+		border: 1px solid hsl(var(--accent) / 0.2);
+		text-decoration: none;
+		cursor: pointer;
+		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+		white-space: nowrap;
 	}
 
-	:global(.dark) .markdown-content :global(.obsidian-tag) {
-		background-color: hsl(var(--accent) / 0.2);
+	.markdown-content :global(.tag-chip:hover) {
+		background: linear-gradient(135deg, hsl(var(--accent) / 0.22), hsl(var(--accent) / 0.12));
 		border-color: hsl(var(--accent) / 0.4);
+		box-shadow: 0 2px 8px hsl(var(--accent) / 0.12);
+		transform: translateY(-1px);
+		text-decoration: none;
+	}
+
+	.markdown-content :global(.tag-chip-hash) {
+		opacity: 0.5;
+		margin-right: 1px;
+	}
+
+	:global(.dark) .markdown-content :global(.tag-chip) {
+		background: linear-gradient(135deg, hsl(var(--accent) / 0.18), hsl(var(--accent) / 0.08));
+		border-color: hsl(var(--accent) / 0.3);
 	}
 
 	/* ================================
@@ -1099,6 +1273,13 @@
 		border-radius: 6px;
 		margin: 0.5rem 0 1rem;
 		box-shadow: 0 2px 8px var(--shadow);
+		cursor: zoom-in;
+		transition: box-shadow 0.2s ease, transform 0.2s ease;
+	}
+
+	.markdown-content :global(.obsidian-embed-image:hover) {
+		box-shadow: 0 4px 20px var(--shadow);
+		transform: scale(1.005);
 	}
 
 	/* ================================
@@ -1123,60 +1304,119 @@
 	}
 
 	/* ================================
-	   Phase B: Code Block Copy Button
+	   Code Blocks — Clean Panel with Line Numbers
 	   ================================ */
 	.markdown-content :global(.code-block-container) {
 		position: relative;
-		margin-bottom: 1rem;
+		margin-bottom: 1.25rem;
+		border-radius: 8px;
+		border: 1px solid hsl(var(--border) / 0.45);
+		overflow: hidden;
 	}
 
 	.markdown-content :global(.code-block-header) {
+		position: relative;
 		display: flex;
-		justify-content: space-between;
 		align-items: center;
-		padding: 0.5rem 1rem;
-		background-color: hsl(var(--muted));
-		border-top-left-radius: 8px;
-		border-top-right-radius: 8px;
-		border: 1px solid hsl(var(--border));
-		border-bottom: none;
+		gap: 0.5rem;
+		padding: 0.4rem 0.75rem;
+		background: hsl(var(--muted) / 0.55);
+		border-bottom: 1px solid hsl(var(--border) / 0.25);
 	}
 
 	.markdown-content :global(.code-lang) {
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: hsl(var(--muted-foreground));
+		font-size: 0.7rem;
+		font-weight: 700;
+		color: hsl(var(--primary));
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.06em;
+		padding: 0.15rem 0.45rem;
+		border-radius: 4px;
+		background: hsl(var(--primary) / 0.08);
+	}
+
+	.markdown-content :global(.code-line-count) {
+		font-size: 0.625rem;
+		color: hsl(var(--muted-foreground) / 0.5);
+		margin-left: auto;
+		transition: opacity 0.15s ease, transform 0.15s cubic-bezier(0.4,0,0.2,1);
+	}
+
+	.markdown-content :global(.code-block-container:hover) :global(.code-line-count) {
+		opacity: 0;
+		transform: translateX(8px);
+		pointer-events: none;
 	}
 
 	.markdown-content :global(.code-copy-btn) {
-		padding: 0.25rem 0.75rem;
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: hsl(var(--foreground));
-		background-color: hsl(var(--background));
-		border: 1px solid hsl(var(--border));
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.25rem;
+		color: hsl(var(--muted-foreground));
+		background: transparent;
+		border: none;
 		border-radius: 4px;
 		cursor: pointer;
-		transition: all 0.15s;
+		position: absolute;
+		right: 0.65rem;
+		top: 50%;
+		transform: translateY(-50%) scale(0.85);
+		opacity: 0;
+		transition: opacity 0.12s ease, transform 0.15s cubic-bezier(0.34,1.56,0.64,1), color 0.12s ease, background-color 0.12s ease;
+	}
+
+	.markdown-content :global(.code-block-container:hover) :global(.code-copy-btn) {
+		opacity: 1;
+		transform: translateY(-50%) scale(1);
 	}
 
 	.markdown-content :global(.code-copy-btn:hover) {
-		background-color: hsl(var(--secondary));
-		border-color: hsl(var(--primary));
+		color: hsl(var(--foreground));
+		background-color: hsl(var(--background) / 0.5);
 	}
 
 	.markdown-content :global(.code-copy-btn.copied) {
-		background-color: hsl(var(--primary));
-		color: white;
-		border-color: hsl(var(--primary));
+		opacity: 1;
+		transform: translateY(-50%) scale(1);
+		color: hsl(142 71% 45%);
 	}
 
 	.markdown-content :global(.code-block-container pre) {
-		margin-top: 0;
-		border-top-left-radius: 0;
-		border-top-right-radius: 0;
-		border-top: none;
+		margin: 0;
+		border-radius: 0;
+		box-shadow: none;
+		border: none;
+		padding: 0.5rem 0.75rem;
+	}
+
+	.markdown-content :global(.code-block-container pre code) {
+		font-size: 0.8rem;
+		line-height: 1.15;
+	}
+
+	.markdown-content :global(.code-line) {
+		display: block;
+		line-height: 1.15;
+	}
+
+	.markdown-content :global(.line-num) {
+		display: inline-block;
+		width: 2.2em;
+		margin-right: 0.75em;
+		text-align: right;
+		color: hsl(var(--muted-foreground) / 0.3);
+		user-select: none;
+		font-size: 0.8em;
+		border-right: 1px solid hsl(var(--border) / 0.15);
+		padding-right: 0.6em;
+	}
+
+	.markdown-content :global(.code-line:hover .line-num) {
+		color: hsl(var(--muted-foreground) / 0.6);
+	}
+
+	.markdown-content :global(.code-line:hover) {
+		background: hsl(var(--foreground) / 0.02);
 	}
 </style>

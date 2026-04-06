@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from cryptography.hazmat.primitives import serialization
 from fastapi.testclient import TestClient
+
+from app.core import security
 
 
 def auth_headers(token: str) -> dict[str, str]:
@@ -202,3 +205,27 @@ def test_audit_logging_on_logout(client: TestClient) -> None:
     # Should have at least one user_logout event
     logout_logs = [log for log in logs if log["action"] == "user_logout"]
     assert len(logout_logs) > 0, "No logout events in audit log"
+
+
+def test_relay_cwt_includes_audience_when_requested() -> None:
+    private_pem, _public_base64 = security.generate_ed25519_keypair()
+    private_key = serialization.load_pem_private_key(private_pem.encode("utf-8"), password=None)
+
+    token = security.create_relay_token_cwt(
+        private_key=private_key,
+        key_id="relay_cp_test",
+        doc_id="doc-123",
+        mode="read",
+        expires_minutes=15,
+        audience="wss://obsidian.wgwg.ru",
+    )
+
+    public_key = private_key.public_key()
+    claims = security.verify_relay_token_cwt(
+        public_key=public_key,
+        token=token,
+        expected_audience="wss://obsidian.wgwg.ru",
+    )
+
+    assert claims["aud"] == "wss://obsidian.wgwg.ru"
+    assert claims["scope"] == "doc:doc-123:r"

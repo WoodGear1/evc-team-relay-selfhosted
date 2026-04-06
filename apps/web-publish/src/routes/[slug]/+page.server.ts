@@ -135,7 +135,7 @@ export const load: PageServerLoad = async ({ params, cookies, url }) => {
 						authToken,
 						resourceKind
 					);
-					readmeContent = fileData.content;
+					readmeContent = fileData.has_content ? fileData.content : null;
 				} catch (err) {
 					console.error('Failed to load README.md:', err);
 					// Silently fail - will show default folder view

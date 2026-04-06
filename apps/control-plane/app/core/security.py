@@ -186,7 +186,7 @@ def create_relay_token_cwt(
     mode: str,
     expires_minutes: int,
     audience: str | None = None,
-    issuer: str = "relay-control-plane",
+    issuer: str | None = None,
 ) -> str:
     """Create CWT (CBOR Web Token) for y-sweet relay-server authentication.
 
@@ -214,22 +214,30 @@ def create_relay_token_cwt(
     auth_code = "rw" if mode == "write" else "r"
     scope = f"doc:{doc_id}:{auth_code}"
 
-    # Build claims map with integer keys (RFC 8392)
-    # Note: y-sweet expects minimal claims - only iss, iat, scope
-    # Do NOT include exp or aud - y-sweet native tokens don't have them
+    # Build claims map with integer keys (RFC 8392).
+    # Match the relay-server CWT implementation:
+    # - include aud when the service validates audience
+    # - include exp so relay can enforce TTL
+    # - omit iss unless it is one of the relay-accepted issuer values
     claims = {
-        CWT_CLAIM_ISS: issuer,
         CWT_CLAIM_IAT: int(now.timestamp()),
+        CWT_CLAIM_EXP: int((now + timedelta(minutes=expires_minutes)).timestamp()),
         CWT_CLAIM_SCOPE: scope,
     }
+    if issuer:
+        claims[CWT_CLAIM_ISS] = issuer
+    if audience:
+        claims[CWT_CLAIM_AUD] = audience
 
     # Encode claims to CBOR
     claims_cbor = cbor2.dumps(claims)
 
-    # Create COSE_Sign1 message
-    # Protected header: algorithm (EdDSA = -8) only
-    # Note: y-sweet does NOT include kid in protected header
-    protected = {1: -8}  # alg: EdDSA
+    # Create COSE_Sign1 message and include `kid` so relay auth can select
+    # the configured verification key.
+    protected = {
+        1: -8,  # alg: EdDSA
+        4: key_id.encode("utf-8"),  # kid
+    }
 
     # Encode protected header
     protected_cbor = cbor2.dumps(protected)
@@ -244,14 +252,12 @@ def create_relay_token_cwt(
     # Build COSE_Sign1 structure: [protected, unprotected, payload, signature]
     cose_sign1 = [protected_cbor, {}, claims_cbor, signature]
 
-    # Encode COSE_Sign1 with tag 18
+    # Encode COSE_Sign1 with tag 18. Upstream relay expects the tagged
+    # COSE_Sign1 payload directly, not an additional outer CWT tag wrapper.
     cose_sign1_cbor = cbor2.dumps(cbor2.CBORTag(COSE_SIGN1_TAG, cose_sign1))
 
-    # Wrap with CWT tag 61
-    cwt_cbor = cbor2.dumps(cbor2.CBORTag(CWT_TAG, cbor2.loads(cose_sign1_cbor)))
-
     # Base64url encode for transport (no padding)
-    token_b64 = base64.urlsafe_b64encode(cwt_cbor).decode("utf-8").rstrip("=")
+    token_b64 = base64.urlsafe_b64encode(cose_sign1_cbor).decode("utf-8").rstrip("=")
 
     return token_b64
 
@@ -280,19 +286,21 @@ def verify_relay_token_cwt(
         token += "=" * padding
     token_bytes = base64.urlsafe_b64decode(token)
 
-    # Parse outer CBOR (should be CWT tag 61)
+    # Parse outer CBOR. Upstream relay emits tagged COSE_Sign1 directly,
+    # while older helpers may still produce a CWT tag wrapper.
     outer = cbor2.loads(token_bytes)
-    if not isinstance(outer, cbor2.CBORTag) or outer.tag != CWT_TAG:
-        raise ValueError(f"Expected CWT tag 61, got: {outer}")
-
-    # Parse inner (should be COSE_Sign1 tag 18)
-    inner = outer.value
-    if isinstance(inner, cbor2.CBORTag):
-        if inner.tag != COSE_SIGN1_TAG:
-            raise ValueError(f"Expected COSE_Sign1 tag 18, got tag: {inner.tag}")
-        cose_sign1 = inner.value
+    if isinstance(outer, cbor2.CBORTag) and outer.tag == CWT_TAG:
+        inner = outer.value
+        if isinstance(inner, cbor2.CBORTag):
+            if inner.tag != COSE_SIGN1_TAG:
+                raise ValueError(f"Expected COSE_Sign1 tag 18, got tag: {inner.tag}")
+            cose_sign1 = inner.value
+        else:
+            cose_sign1 = inner
+    elif isinstance(outer, cbor2.CBORTag) and outer.tag == COSE_SIGN1_TAG:
+        cose_sign1 = outer.value
     else:
-        cose_sign1 = inner
+        raise ValueError(f"Expected tagged COSE_Sign1 or CWT wrapper, got: {outer}")
 
     if not isinstance(cose_sign1, list) or len(cose_sign1) != 4:
         raise ValueError("Invalid COSE_Sign1 structure")

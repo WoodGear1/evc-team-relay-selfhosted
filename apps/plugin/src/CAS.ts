@@ -56,9 +56,19 @@ export class ContentAddressedStore extends HasLogging {
 				`[${this.sharedFolder.path}] File is missing: ${syncFile.guid} ${syncFile.meta.hash} ${syncFile.meta.type}`,
 			);
 		}
+		if (!response.ok) {
+			throw new Error(
+				`[${this.sharedFolder.path}] Unable to get download URL for ${syncFile.path}: ${response.status}`,
+			);
+		}
 		const responseJson = await response.json();
 		const presignedUrl = responseJson.downloadUrl;
 		const downloadResponse = await customFetch(presignedUrl);
+		if (!downloadResponse.ok) {
+			throw new Error(
+				`[${this.sharedFolder.path}] Download failed for ${syncFile.path}: ${downloadResponse.status}`,
+			);
+		}
 		return downloadResponse.arrayBuffer();
 	}
 
@@ -84,11 +94,16 @@ export class ContentAddressedStore extends HasLogging {
 			throw new Error(responseJson.error);
 		}
 		const presignedUrl = responseJson.uploadUrl;
-		await customFetch(presignedUrl, {
+		const uploadResponse = await customFetch(presignedUrl, {
 			method: "PUT",
 			headers: { "Content-Type": syncFile.mimetype },
 			body: content,
 		});
+		if (!uploadResponse.ok) {
+			throw new Error(
+				`Upload failed for ${syncFile.path}: ${uploadResponse.status}`,
+			);
+		}
 		return;
 	}
 

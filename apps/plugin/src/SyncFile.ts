@@ -15,6 +15,7 @@ import { generateHash } from "./hashing";
 import type { HasMimeType, IFile } from "./IFile";
 import { getMimeType } from "./mimetypes";
 import { flags } from "./flagManager";
+import { dirname } from "path-browserify";
 
 export function isSyncFile(file: IFile | undefined): file is SyncFile {
 	return !!file && file instanceof SyncFile;
@@ -477,14 +478,18 @@ export class SyncFile
 		}
 		try {
 			const content = await this.sharedFolder.cas.readFile(this);
+			const parentDir = dirname(this.path);
+			if (parentDir && parentDir !== ".") {
+				await this.sharedFolder.mkdir(parentDir);
+			}
 			await this.vault.adapter.writeBinary(
 				this.sharedFolder.getPath(this.path),
 				content,
 			);
 			await this.caf.hash();
 		} catch (e: unknown) {
-			this.log(e);
-			return;
+			this.error("pull failed", e);
+			throw e;
 		}
 	}
 

@@ -68,6 +68,13 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			sameSite: 'lax',
 			maxAge: tokenResponse.expires_in || 86400 // Default 24 hours
 		});
+		cookies.set('refresh_token', tokenResponse.refresh_token, {
+			path: '/',
+			httpOnly: true,
+			secure: url.protocol === 'https:',
+			sameSite: 'lax',
+			maxAge: 60 * 60 * 24 * 30
+		});
 
 		// Redirect to return URL
 		return new Response(null, {

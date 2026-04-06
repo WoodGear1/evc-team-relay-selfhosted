@@ -96,7 +96,9 @@ export const load: PageServerLoad = async ({ params, cookies }) => {
 				authToken,
 				resourceKind
 			);
-			content = fileContent.content || '# Content not available\n\nThis file has not been synced yet.';
+			content = fileContent.has_content
+				? fileContent.content
+				: '# Content not available\n\nThis file has not been synced yet.';
 		} catch (fetchError) {
 			// If file content fetch fails, show placeholder
 			content = `# ${file.name}

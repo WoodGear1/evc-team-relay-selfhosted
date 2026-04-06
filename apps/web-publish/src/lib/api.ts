@@ -241,13 +241,12 @@ export interface OAuthAuthorizeResponse {
 
 export interface OAuthCallbackResponse {
 	access_token: string;
+	refresh_token: string;
 	token_type: string;
 	expires_in: number;
-	user: {
-		id: string;
-		email: string;
-		name: string | null;
-	};
+	user_id: string;
+	user_email: string;
+	user_name: string | null;
 }
 
 export interface PasswordLoginRequest {
@@ -263,6 +262,15 @@ export interface PasswordLoginSuccessResponse {
 	access_token: string;
 	refresh_token: string;
 	expires_in: number;
+}
+
+export interface CurrentUser {
+	id: string;
+	email: string;
+	name: string | null;
+	is_admin: boolean;
+	is_active: boolean;
+	created_at: string;
 }
 
 /**
@@ -293,6 +301,23 @@ export async function requestPasswordLogin(
 		},
 		body: JSON.stringify(payload)
 	});
+}
+
+export async function refreshAccessToken(refreshToken: string): Promise<PasswordLoginSuccessResponse> {
+	const response = await fetch(`${CONTROL_PLANE_URL}/v1/auth/refresh`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ refresh_token: refreshToken })
+	});
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ detail: 'Token refresh failed' }));
+		throw new Error(error.detail || 'Token refresh failed');
+	}
+
+	return response.json();
 }
 
 /**
@@ -355,6 +380,20 @@ export async function validateUserToken(token: string): Promise<{ valid: boolean
 
 	const user = await response.json();
 	return { valid: true, user_id: user.id };
+}
+
+export async function getCurrentUser(token: string): Promise<CurrentUser> {
+	const response = await fetch(`${CONTROL_PLANE_URL}/v1/auth/me`, {
+		headers: {
+			Authorization: `Bearer ${token}`
+		}
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to fetch current user: ${response.statusText}`);
+	}
+
+	return response.json();
 }
 
 /**
@@ -439,6 +478,7 @@ export interface FolderFileContent {
 	name: string;
 	type: string;
 	content: string;
+	has_content?: boolean;
 }
 
 /**
@@ -466,6 +506,65 @@ export async function getFolderFileContent(
 
 	if (!response.ok) {
 		throw new Error(`Failed to fetch file content: ${response.statusText}`);
+	}
+
+	return response.json();
+}
+
+export interface DiscoverableShare {
+	slug: string;
+	path: string;
+	kind: string;
+	visibility: string;
+	title: string | null;
+	description: string | null;
+	updated_at: string | null;
+}
+
+/**
+ * List all discoverable (public/protected) web-published shares.
+ */
+export async function discoverShares(): Promise<DiscoverableShare[]> {
+	try {
+		const response = await fetch(`${CONTROL_PLANE_URL}/v1/web/discover`);
+		if (!response.ok) return [];
+		return response.json();
+	} catch {
+		return [];
+	}
+}
+
+export interface SearchResultHit {
+	path: string;
+	name: string;
+	type: string;
+	snippet: string;
+	score: number;
+}
+
+export async function searchShareContent(
+	slug: string,
+	query: string,
+	sessionToken?: string,
+	authToken?: string,
+	resourceKind: WebResourceKind = 'share',
+	limit = 8
+): Promise<SearchResultHit[]> {
+	const headers: Record<string, string> = {};
+	if (sessionToken) {
+		headers['Cookie'] = `web_session=${sessionToken}`;
+	}
+	if (authToken) {
+		headers['Authorization'] = `Bearer ${authToken}`;
+	}
+
+	const response = await fetch(
+		`${CONTROL_PLANE_URL}/v1/web/${resourceKind === 'link' ? 'links' : 'shares'}/${slug}/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+		{ headers }
+	);
+
+	if (!response.ok) {
+		throw new Error(`Failed to search content: ${response.statusText}`);
 	}
 
 	return response.json();

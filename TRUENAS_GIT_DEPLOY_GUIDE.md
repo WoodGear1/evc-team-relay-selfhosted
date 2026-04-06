@@ -64,6 +64,9 @@ ssh root@truenas "cd /mnt/tank/docker-containers/obsidian-relay/code && export E
 
 ## Plugin Runtime Files
 
+Canonical source for break-glass plugin runtime sync is `apps/plugin` after `npm run build:plugin`.
+Do not copy assets from ad-hoc directories such as `.tmp-plugin-release`.
+
 ### 1. Build locally
 
 ```powershell
@@ -71,14 +74,10 @@ cd f:\Development\ObsidianSinc\brat-repo
 npm run build:plugin
 ```
 
-### 2. Copy files to TrueNAS
+### 2. Sync and verify files on TrueNAS
 
 ```powershell
-scp "f:\Development\ObsidianSinc\brat-repo\apps\plugin\main.js" "root@truenas:/mnt/tank/docker-containers/reverse-proxy/plugin-dist/main.js"
-scp "f:\Development\ObsidianSinc\brat-repo\apps\plugin\manifest.json" "root@truenas:/mnt/tank/docker-containers/reverse-proxy/plugin-dist/manifest.json"
-scp "f:\Development\ObsidianSinc\brat-repo\apps\plugin\manifest-beta.json" "root@truenas:/mnt/tank/docker-containers/reverse-proxy/plugin-dist/manifest-beta.json"
-scp "f:\Development\ObsidianSinc\brat-repo\apps\plugin\styles.css" "root@truenas:/mnt/tank/docker-containers/reverse-proxy/plugin-dist/styles.css"
-scp "f:\Development\ObsidianSinc\brat-repo\apps\plugin\versions.json" "root@truenas:/mnt/tank/docker-containers/reverse-proxy/plugin-dist/versions.json"
+npm run sync:plugin-dist
 ```
 
 ## Smoke Checks

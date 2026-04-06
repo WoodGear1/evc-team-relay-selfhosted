@@ -122,12 +122,28 @@ def get_previous_version(
     return db.execute(stmt).scalar_one_or_none()
 
 
+def _validate_diff_base_version(
+    version: models.DocumentVersion,
+    base_version: models.DocumentVersion,
+) -> None:
+    if (
+        base_version.share_id != version.share_id
+        or base_version.document_path != version.document_path
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Base version must belong to the same document",
+        )
+
+
 def build_diff_preview(
     db: Session,
     version: models.DocumentVersion,
     base_version_id: uuid.UUID | None = None,
 ) -> tuple[models.DocumentVersion | None, str]:
     base_version = get_version(db, base_version_id) if base_version_id else get_previous_version(db, version)
+    if base_version:
+        _validate_diff_base_version(version, base_version)
     base_content = base_version.content if base_version else ""
     diff = difflib.unified_diff(
         base_content.splitlines(),

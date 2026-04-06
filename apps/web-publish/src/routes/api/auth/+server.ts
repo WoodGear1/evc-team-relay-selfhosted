@@ -112,3 +112,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		throw error(500, 'Internal server error');
 	}
 };
+
+export const DELETE: RequestHandler = async ({ cookies }) => {
+	cookies.delete('auth_token', { path: '/' });
+	cookies.delete('refresh_token', { path: '/' });
+	cookies.delete('web_session', { path: '/' });
+
+	return json({ success: true });
+};

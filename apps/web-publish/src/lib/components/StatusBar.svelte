@@ -112,14 +112,14 @@
 
 <style>
 	.status-bar {
-		padding: 0.5rem 0;
-		border-bottom: 1px solid hsl(var(--border));
-		margin-bottom: 1rem;
+		padding: 0.625rem 0;
+		border-bottom: 1px solid hsl(var(--border) / 0.3);
+		margin-bottom: 1.25rem;
 	}
 
 	.status-items {
 		display: flex;
-		gap: 1rem;
+		gap: 0.75rem;
 		align-items: center;
 		flex-wrap: wrap;
 	}
@@ -128,12 +128,13 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.375rem;
-		font-size: 0.8125rem;
+		font-size: 0.75rem;
 		color: hsl(var(--muted-foreground));
 	}
 
 	.status-item svg {
 		flex-shrink: 0;
+		opacity: 0.6;
 	}
 
 	.status-item.date {
@@ -149,22 +150,23 @@
 		align-items: center;
 		border-radius: 999px;
 		padding: 0.125rem 0.5rem;
-		font-size: 0.75rem;
+		font-size: 0.6875rem;
 		font-weight: 600;
+		letter-spacing: 0.02em;
 	}
 
 	.badge-secondary {
-		background: hsl(var(--secondary));
+		background: hsl(var(--secondary) / 0.6);
 		color: hsl(var(--secondary-foreground));
 	}
 
 	.badge-warning {
-		background: color-mix(in srgb, hsl(var(--primary)) 12%, transparent);
+		background: hsl(var(--primary) / 0.1);
 		color: hsl(var(--foreground));
 	}
 
 	.badge-destructive {
-		background: color-mix(in srgb, hsl(var(--destructive)) 16%, transparent);
+		background: hsl(var(--destructive) / 0.1);
 		color: hsl(var(--destructive));
 	}
 
@@ -172,18 +174,19 @@
 		display: inline-flex;
 		align-items: center;
 		border: none;
-		border-radius: 0.375rem;
+		border-radius: 0.5rem;
 		padding: 0.25rem 0.5rem;
-		font-size: 0.75rem;
+		font-size: 0.6875rem;
 		gap: 0.25rem;
 		height: auto;
 		background: transparent;
 		color: hsl(var(--muted-foreground));
 		cursor: pointer;
+		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 	}
 
 	.btn-compact:hover {
-		background: hsl(var(--muted));
-		color: hsl(var(--foreground));
+		background: hsl(var(--primary) / 0.08);
+		color: hsl(var(--primary));
 	}
 </style>

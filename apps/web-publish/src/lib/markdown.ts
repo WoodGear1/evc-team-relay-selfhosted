@@ -127,10 +127,21 @@ function protectMath(text: string): string {
  * Full preprocessing pipeline.
  * Returns cleaned markdown ready for marked.parse().
  */
+function encodeSpacesInLinks(text: string): string {
+	return text.replace(
+		/\[([^\]]+)\]\(([^)]*\s[^)]*)\)/g,
+		(_match, label: string, url: string) => {
+			const encoded = url.replace(/ /g, '%20');
+			return `[${label}](${encoded})`;
+		}
+	);
+}
+
 function preprocessMarkdown(raw: string): string {
 	let text = raw;
 	text = stripFrontmatter(text);
 	text = stripComments(text);
+	text = encodeSpacesInLinks(text);
 	text = protectMath(text);
 	return text;
 }
@@ -205,22 +216,34 @@ const highlightExtension = {
 };
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function _slugifySegment(s: string): string {
+	return s.replace(/ /g, '-');
+}
+
+function _slugifyPath(p: string): string {
+	return p.split('/').map(_slugifySegment).join('/');
+}
+
+const _linkSvg = '<svg class="wikilink-chip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+
+// ---------------------------------------------------------------------------
 // Marked extensions: Wikilinks
 // ---------------------------------------------------------------------------
 
 /**
  * Inline extension for [[wikilinks]] and [[target|display]].
- * Does NOT match ![[embeds]].
+ * Renders as styled chips. Resolved links navigate; unresolved are inert.
  */
 const wikilinkExtension = {
 	name: 'wikilink' as const,
 	level: 'inline' as const,
 	start(src: string) {
-		// Find [[ that is NOT preceded by !
 		const idx = src.indexOf('[[');
 		if (idx === -1) return -1;
 		if (idx > 0 && src[idx - 1] === '!') {
-			// Skip this one, find the next
 			const rest = src.slice(idx + 2);
 			const next = rest.indexOf('[[');
 			if (next === -1) return -1;
@@ -229,7 +252,6 @@ const wikilinkExtension = {
 		return idx;
 	},
 	tokenizer(src: string) {
-		// Don't match if preceded by !
 		const match = src.match(/^\[\[([^\]]+)\]\]/);
 		if (match) {
 			const content = match[1];
@@ -257,7 +279,6 @@ const wikilinkExtension = {
 	renderer(token: { target: string; display: string }) {
 		const { target, display } = token;
 
-		// Internal heading link: [[#Heading]]
 		if (target.startsWith('#')) {
 			const slug = target
 				.slice(1)
@@ -265,11 +286,20 @@ const wikilinkExtension = {
 				.replace(/[^\w\s-]/g, '')
 				.replace(/\s+/g, '-');
 			const text = display.startsWith('#') ? display.slice(1) : display;
-			return `<a class="obsidian-wikilink obsidian-wikilink-heading" href="#${escapeHtml(slug)}">${escapeHtml(text)}</a>`;
+			return `<a class="wikilink-chip wikilink-resolved" href="#${escapeHtml(slug)}">${_linkSvg}<span>${escapeHtml(text)}</span></a>`;
 		}
 
-		// Regular wikilink: non-functional in web-publish (no onclick for XSS safety)
-		return `<a class="obsidian-wikilink" href="#" data-wikilink-disabled>${escapeHtml(display)}</a>`;
+		if (_renderContext.slug && _renderContext.folderItems) {
+			const item = _renderContext.folderItems.find(
+				(i) => i.path === target || i.path === `${target}.md` || i.name === target
+			);
+			if (item) {
+				const href = `/${_renderContext.slug}/${_slugifyPath(item.path)}`;
+				return `<a class="wikilink-chip wikilink-resolved" href="${escapeHtml(href)}">${_linkSvg}<span>${escapeHtml(display)}</span></a>`;
+			}
+		}
+
+		return `<span class="wikilink-chip wikilink-unresolved">${_linkSvg}<span>${escapeHtml(display)}</span></span>`;
 	}
 };
 
@@ -284,19 +314,19 @@ const wikilinkExtension = {
  * - URL anchors (e.g., https://example.com#anchor)
  * - Heading references inside wikilinks (e.g., [[#heading]])
  */
+const _isLetter = (ch: string) => /[\p{L}]/u.test(ch);
+
 const tagExtension = {
 	name: 'obsidianTag' as const,
 	level: 'inline' as const,
 	start(src: string) {
 		let idx = src.indexOf('#');
 		while (idx !== -1) {
-			// Skip if preceded by : or / (URL context like https://example.com#anchor)
 			if (idx > 0 && (src[idx - 1] === ':' || src[idx - 1] === '/')) {
 				idx = src.indexOf('#', idx + 1);
 				continue;
 			}
-			// Must be followed by a letter (not digit, not space)
-			if (idx + 1 < src.length && /[a-zA-Z]/.test(src[idx + 1])) {
+			if (idx + 1 < src.length && _isLetter(src[idx + 1])) {
 				return idx;
 			}
 			idx = src.indexOf('#', idx + 1);
@@ -304,9 +334,7 @@ const tagExtension = {
 		return -1;
 	},
 	tokenizer(src: string) {
-		// Pattern: #word (can contain letters, numbers, /, -)
-		// Must start with letter after #
-		const match = src.match(/^#([a-zA-Z][a-zA-Z0-9/_-]*)/);
+		const match = src.match(/^#([\p{L}][\p{L}\p{N}\/_-]*)/u);
 		if (match) {
 			return {
 				type: 'obsidianTag',
@@ -317,7 +345,8 @@ const tagExtension = {
 		return undefined;
 	},
 	renderer(token: { tag: string }) {
-		return `<span class="obsidian-tag">#${escapeHtml(token.tag)}</span>`;
+		const safe = escapeHtml(token.tag);
+		return `<a class="tag-chip" data-tag="${safe}" href="#"><span class="tag-chip-hash">#</span>${safe}</a>`;
 	}
 };
 
@@ -370,10 +399,10 @@ const embedExtension = {
 		// Image embeds with asset proxy
 		if (imageExts.includes(ext)) {
 			if (_renderContext.slug) {
+				const encodedTarget = encodeURIComponent(target).replace(/%2F/g, '/');
 				const styleAttr = safeSize ? ` style="max-width: ${safeSize}px"` : '';
-				return `<img class="obsidian-embed-image" src="/${_renderContext.slug}/_assets/${safeTarget}" alt="${safeTarget}"${styleAttr} />`;
+				return `<img class="obsidian-embed-image" src="/${_renderContext.slug}/_assets/${encodedTarget}" alt="${safeTarget}" loading="lazy"${styleAttr} />`;
 			}
-			// Fallback placeholder without slug
 			const sizeInfo = safeSize ? ` (${safeSize}px)` : '';
 			return `<div class="obsidian-embed obsidian-embed-image"><span class="obsidian-embed-icon">&#128444;</span> Image: <strong>${safeTarget}</strong>${sizeInfo}</div>`;
 		}
@@ -414,35 +443,57 @@ const embedExtension = {
 // Marked extensions: Callouts
 // ---------------------------------------------------------------------------
 
-/** Callout type metadata: icon (Unicode) and CSS color class suffix */
+// SVG icon helper — compact Lucide-style icons for callouts
+const _svg = (d: string) =>
+	`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+
+const CALLOUT_ICONS: Record<string, string> = {
+	pencil:   _svg('<path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>'),
+	info:     _svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>'),
+	todo:     _svg('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/>'),
+	clipboard:_svg('<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>'),
+	flame:    _svg('<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'),
+	check:    _svg('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>'),
+	help:     _svg('<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>'),
+	alert:    _svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'),
+	xCircle:  _svg('<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>'),
+	zap:      _svg('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
+	bug:      _svg('<path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3 3 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>'),
+	list:     _svg('<line x1="10" x2="21" y1="6" y2="6"/><line x1="10" x2="21" y1="12" y2="12"/><line x1="10" x2="21" y1="18" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>'),
+	quote:    _svg('<path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/>'),
+	octagon:  _svg('<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>'),
+	lightbulb:_svg('<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>'),
+};
+
+/** Callout type metadata: icon key and CSS color class suffix */
 const CALLOUT_TYPES: Record<string, { icon: string; color: string }> = {
-	note: { icon: '\u270F\uFE0F', color: 'blue' },
-	info: { icon: '\u2139\uFE0F', color: 'blue' },
-	todo: { icon: '\u2611\uFE0F', color: 'blue' },
-	abstract: { icon: '\uD83D\uDCCB', color: 'teal' },
-	summary: { icon: '\uD83D\uDCCB', color: 'teal' },
-	tldr: { icon: '\uD83D\uDCCB', color: 'teal' },
-	tip: { icon: '\uD83D\uDD25', color: 'cyan' },
-	hint: { icon: '\uD83D\uDD25', color: 'cyan' },
-	important: { icon: '\uD83D\uDD25', color: 'cyan' },
-	success: { icon: '\u2705', color: 'green' },
-	check: { icon: '\u2705', color: 'green' },
-	done: { icon: '\u2705', color: 'green' },
-	question: { icon: '\u2753', color: 'yellow' },
-	help: { icon: '\u2753', color: 'yellow' },
-	faq: { icon: '\u2753', color: 'yellow' },
-	warning: { icon: '\u26A0\uFE0F', color: 'orange' },
-	caution: { icon: '\u26A0\uFE0F', color: 'orange' },
-	attention: { icon: '\u26A0\uFE0F', color: 'orange' },
-	failure: { icon: '\u274C', color: 'red' },
-	fail: { icon: '\u274C', color: 'red' },
-	missing: { icon: '\u274C', color: 'red' },
-	danger: { icon: '\u26D4', color: 'red-dark' },
-	error: { icon: '\u26D4', color: 'red-dark' },
-	bug: { icon: '\uD83D\uDC1B', color: 'red' },
-	example: { icon: '\uD83D\uDCDD', color: 'purple' },
-	quote: { icon: '\u275D', color: 'gray' },
-	cite: { icon: '\u275D', color: 'gray' }
+	note:      { icon: 'pencil',    color: 'blue' },
+	info:      { icon: 'info',      color: 'blue' },
+	todo:      { icon: 'todo',      color: 'blue' },
+	abstract:  { icon: 'clipboard', color: 'teal' },
+	summary:   { icon: 'clipboard', color: 'teal' },
+	tldr:      { icon: 'clipboard', color: 'teal' },
+	tip:       { icon: 'lightbulb', color: 'cyan' },
+	hint:      { icon: 'lightbulb', color: 'cyan' },
+	important: { icon: 'flame',     color: 'cyan' },
+	success:   { icon: 'check',     color: 'green' },
+	check:     { icon: 'check',     color: 'green' },
+	done:      { icon: 'check',     color: 'green' },
+	question:  { icon: 'help',      color: 'yellow' },
+	help:      { icon: 'help',      color: 'yellow' },
+	faq:       { icon: 'help',      color: 'yellow' },
+	warning:   { icon: 'alert',     color: 'orange' },
+	caution:   { icon: 'alert',     color: 'orange' },
+	attention: { icon: 'alert',     color: 'orange' },
+	failure:   { icon: 'xCircle',   color: 'red' },
+	fail:      { icon: 'xCircle',   color: 'red' },
+	missing:   { icon: 'xCircle',   color: 'red' },
+	danger:    { icon: 'octagon',   color: 'red-dark' },
+	error:     { icon: 'octagon',   color: 'red-dark' },
+	bug:       { icon: 'bug',       color: 'red' },
+	example:   { icon: 'list',      color: 'purple' },
+	quote:     { icon: 'quote',     color: 'gray' },
+	cite:      { icon: 'quote',     color: 'gray' },
 };
 
 /**
@@ -477,29 +528,15 @@ function walkTokensForCallouts(token: Token): void {
 	const titleLines = titleAndRest.split('\n');
 	const title = titleLines[0].trim() || calloutType.charAt(0).toUpperCase() + calloutType.slice(1);
 
-	// Mark this blockquote as a callout by injecting data into the token
-	// We use a custom property that our renderer will detect
 	(bq as unknown as Record<string, unknown>)._callout = {
 		type: calloutType,
 		title,
 		foldable: foldChar !== '',
 		defaultOpen: foldChar !== '-'
 	};
-
-	// Remove the callout header from the paragraph text
-	// Keep only remaining lines as content
-	if (titleLines.length > 1) {
-		const remaining = titleLines.slice(1).join('\n');
-		para.text = remaining;
-		para.raw = remaining;
-		// Re-lex the inline tokens for the remaining text
-		if (para.tokens) {
-			para.tokens = [];
-		}
-	} else {
-		// No remaining text in first paragraph - remove it
-		bq.tokens.shift();
-	}
+	// We intentionally do NOT modify para.text/tokens here.
+	// The blockquote renderer strips the header from the rendered HTML instead,
+	// which avoids stale-token bugs caused by clearing para.tokens.
 }
 
 /**
@@ -565,26 +602,33 @@ marked.use({
 				| { type: string; title: string; foldable: boolean; defaultOpen: boolean }
 				| undefined;
 
+			const parse = (tokens: Token[]) =>
+				this && typeof (this as { parser?: { parse: (tokens: Token[]) => string } }).parser?.parse === 'function'
+					? (this as { parser: { parse: (tokens: Token[]) => string } }).parser.parse(tokens)
+					: '';
+
 			if (!callout) {
-				// Regular blockquote - use default rendering
-				// Render child tokens to HTML
-				const body = this && typeof (this as { parser?: { parse: (tokens: Token[]) => string } }).parser?.parse === 'function'
-					? (this as { parser: { parse: (tokens: Token[]) => string } }).parser.parse(token.tokens)
-					: token.text || '';
-				return `<blockquote>\n${body}</blockquote>\n`;
+				return `<blockquote>\n${parse(token.tokens)}</blockquote>\n`;
 			}
 
 			const meta = CALLOUT_TYPES[callout.type] || CALLOUT_TYPES['note'];
 			const colorClass = `callout-${meta.color}`;
 			const typeClass = `callout-${callout.type}`;
+			const iconSvg = CALLOUT_ICONS[meta.icon] || CALLOUT_ICONS['info'];
 
-			// Render content tokens
-			const contentHtml = this && typeof (this as { parser?: { parse: (tokens: Token[]) => string } }).parser?.parse === 'function'
-				? (this as { parser: { parse: (tokens: Token[]) => string } }).parser.parse(token.tokens)
-				: token.text || '';
+			// Render all child tokens (includes the callout header text)
+			let contentHtml = parse(token.tokens);
 
-			const titleHtml = `<div class="callout-title"><span class="callout-icon">${meta.icon}</span><span class="callout-title-text">${escapeHtml(callout.title)}</span>${callout.foldable ? '<span class="callout-fold-icon"></span>' : ''}</div>`;
-			const contentWrapper = contentHtml.trim()
+			// Strip the [!type] header from the first <p> in the rendered HTML
+			contentHtml = contentHtml.replace(
+				/^(\s*<p>)\[!\w+\][-+]?\s*[^\n<]*/,
+				'$1'
+			);
+			// Clean empty paragraphs left after stripping
+			contentHtml = contentHtml.replace(/<p>\s*<\/p>/g, '').trim();
+
+			const titleHtml = `<div class="callout-title"><span class="callout-icon">${iconSvg}</span><span class="callout-title-text">${escapeHtml(callout.title)}</span>${callout.foldable ? '<span class="callout-fold-icon"></span>' : ''}</div>`;
+			const contentWrapper = contentHtml
 				? `<div class="callout-content">${contentHtml}</div>`
 				: '';
 
@@ -601,21 +645,26 @@ marked.use({
 				return `<div class="mermaid">${token.text}</div>\n`;
 			}
 
-			// Code block with copy button and language label
 			const lang = token.lang || 'text';
 			const langDisplay = lang.charAt(0).toUpperCase() + lang.slice(1);
 			const langClass = ` class="hljs language-${lang}"`;
-
-			// Code content - already highlighted by marked-highlight
 			const codeContent = token.text;
 
-			return `<div class="code-block-container">
-				<div class="code-block-header">
-					<span class="code-lang">${langDisplay}</span>
-					<button class="code-copy-btn">Copy</button>
-				</div>
-				<pre><code${langClass}>${codeContent}</code></pre>
-			</div>\n`;
+			// Build line-numbered code
+			const rawLines = codeContent.split('\n');
+			// Remove trailing empty line that marked sometimes adds
+			if (rawLines.length > 1 && rawLines[rawLines.length - 1] === '') rawLines.pop();
+			const lineCount = rawLines.length;
+			const gutterWidth = String(lineCount).length;
+
+			const numberedLines = rawLines
+				.map((line, i) => {
+					const num = String(i + 1).padStart(gutterWidth, ' ');
+					return `<span class="code-line"><span class="line-num" data-line="${i + 1}">${num}</span>${line}</span>`;
+				})
+				.join('\n');
+
+			return `<div class="code-block-container"><div class="code-block-header"><span class="code-lang">${langDisplay}</span><span class="code-line-count">${lineCount} lines</span><button class="code-copy-btn" aria-label="Copy code"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button></div><pre><code${langClass}>${numberedLines}</code></pre></div>\n`;
 		},
 
 		listitem(this: unknown, token: Tokens.ListItem) {
@@ -640,6 +689,48 @@ marked.use({
 
 			// Regular list item
 			return `<li>${body}</li>\n`;
+		},
+
+		link(token: Tokens.Link) {
+			const href = token.href || '';
+			const richText = token.text || href;
+			const plainText = richText.replace(/<[^>]*>/g, '');
+
+			// Internal document link (.md)
+			if (href.endsWith('.md') || href.match(/\.md#/)) {
+				const docSvg = '<svg class="chip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+				if (_renderContext.slug && _renderContext.folderItems) {
+					const decoded = decodeURIComponent(href);
+					const cleanHref = decoded.replace(/^(\.\.\/)+/, '').replace(/^\.\//, '');
+					const baseName = cleanHref.split('/').pop() || cleanHref;
+					const item = _renderContext.folderItems.find(
+						(i) =>
+							i.path === cleanHref ||
+							i.path.endsWith(cleanHref) ||
+							i.path === baseName ||
+							i.path.endsWith('/' + baseName)
+					);
+					if (item) {
+						const resolved = `/${_renderContext.slug}/${_slugifyPath(item.path)}`;
+						return `<a class="doc-link-chip" href="${escapeHtml(resolved)}">${docSvg}<span>${richText}</span></a>`;
+					}
+				}
+
+				return `<span class="doc-link-chip doc-link-unresolved">${docSvg}<span>${richText}</span></span>`;
+			}
+
+			// External URL
+			if (href.startsWith('http://') || href.startsWith('https://')) {
+				let domain = '';
+				try { domain = new URL(href).hostname; } catch { /* ignore */ }
+				const favicon = domain ? `<img class="ext-link-favicon" src="https://www.google.com/s2/favicons?sz=16&domain=${escapeHtml(domain)}" alt="" width="14" height="14" loading="lazy" />` : '';
+				const extSvg = '<svg class="ext-link-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7"/><path d="M7 7h10v10"/></svg>';
+				return `<a class="ext-link-chip" href="${escapeHtml(href)}" target="_blank" rel="noopener">${favicon}<span>${richText}</span>${extSvg}</a>`;
+			}
+
+			// Anchor / other
+			return `<a href="${escapeHtml(href)}">${richText}</a>`;
 		}
 	}
 });
@@ -661,9 +752,11 @@ const SANITIZE_CONFIG = {
 		'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
 		'p', 'a', 'ul', 'ol', 'li',
 		'blockquote', 'code', 'pre',
-		'strong', 'em', 'del',
+		'strong', 'em', 'del', 'u', 's', 'small', 'big', 'abbr', 'kbd',
 		'table', 'thead', 'tbody', 'tr', 'th', 'td',
 		'br', 'hr', 'img', 'span', 'div',
+		// Obsidian HTML passthrough
+		'center', 'font',
 		// Highlights
 		'mark',
 		// Callouts (foldable)
@@ -686,7 +779,9 @@ const SANITIZE_CONFIG = {
 	],
 	ALLOWED_ATTR: [
 		'href', 'title', 'src', 'alt', 'class', 'id',
-		'target', 'rel',
+		'target', 'rel', 'loading',
+		// Obsidian HTML passthrough
+		'color', 'face', 'size', 'align', 'bgcolor',
 		// Callouts
 		'open',
 		// Task lists and code blocks
