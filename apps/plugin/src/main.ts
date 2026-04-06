@@ -1711,7 +1711,64 @@ export default class Live extends Plugin {
 			const aliasSuffix = aliasIndex >= 0 ? inner.slice(aliasIndex) : "";
 			return `![[${relativeTargetPath}${aliasSuffix}]]`;
 		}
+		// Normalize markdown image embeds to wikilinks to avoid `%20`-style
+		// URL encoding artifacts and keep Obsidian-native formatting.
+		const markdownImageMatch = original.match(/^!\[([^\]]*)\]\([^)]+\)$/);
+		if (markdownImageMatch) {
+			const alt = markdownImageMatch[1]?.trim();
+			return alt
+				? `![[${relativeTargetPath}|${alt}]]`
+				: `![[${relativeTargetPath}]]`;
+		}
 		return original.replace(/\(([^)]+)\)/, `(${relativeTargetPath})`);
+	}
+
+	private isLikelyCorruptedImageData(bytes: ArrayBuffer, extension: string): boolean {
+		if (bytes.byteLength === 0) {
+			return true;
+		}
+		const ext = extension.toLowerCase();
+		const view = new Uint8Array(bytes);
+		const hasPrefix = (...sig: number[]) =>
+			sig.every((value, idx) => view[idx] === value);
+
+		if (ext === "png") return !hasPrefix(0x89, 0x50, 0x4e, 0x47);
+		if (ext === "jpg" || ext === "jpeg") return !hasPrefix(0xff, 0xd8);
+		if (ext === "gif") return !(hasPrefix(0x47, 0x49, 0x46, 0x38));
+		if (ext === "bmp") return !hasPrefix(0x42, 0x4d);
+		if (ext === "webp") {
+			const riff = hasPrefix(0x52, 0x49, 0x46, 0x46);
+			const webp =
+				view.length > 11 &&
+				view[8] === 0x57 &&
+				view[9] === 0x45 &&
+				view[10] === 0x42 &&
+				view[11] === 0x50;
+			return !(riff && webp);
+		}
+		if (ext === "avif") {
+			// `ftypavif` typically appears at byte offset 4.
+			return !(
+				view.length > 11 &&
+				view[4] === 0x66 &&
+				view[5] === 0x74 &&
+				view[6] === 0x79 &&
+				view[7] === 0x70 &&
+				view[8] === 0x61 &&
+				view[9] === 0x76 &&
+				view[10] === 0x69 &&
+				view[11] === 0x66
+			);
+		}
+		if (ext === "svg") {
+			try {
+				const text = new TextDecoder("utf-8").decode(bytes).trimStart();
+				return !(text.startsWith("<svg") || text.startsWith("<?xml"));
+			} catch {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private async migrateManagedAttachmentsForSharedFolder(
@@ -1748,7 +1805,8 @@ export default class Live extends Plugin {
 				const isLegacyRootImg = linkedPath.startsWith("img/");
 				const isLikelyRootPaste =
 					!linkedPath.includes("/") && linkedFile.name.startsWith("Pasted image ");
-				if (!isManaged && !isLegacyRootImg && !isLikelyRootPaste) {
+				const isImageEmbed = this.attachmentManager.isImageFilename(linkedFile.name);
+				if (!isImageEmbed && !isManaged && !isLegacyRootImg && !isLikelyRootPaste) {
 					continue;
 				}
 
@@ -1757,12 +1815,28 @@ export default class Live extends Plugin {
 					linkedFile.name,
 					managedFolder,
 				);
+				const sourceBinary = await this.vault.readBinary(linkedFile);
 
 				if (!this.vault.getAbstractFileByPath(destinationPath)) {
 					await this.attachmentManager.ensureManagedFolder(managedFolder);
-					const binary = await this.vault.readBinary(linkedFile);
-					await this.vault.createBinary(destinationPath, binary);
+					await this.vault.createBinary(destinationPath, sourceBinary);
 					await this.addManagedAttachment(destinationPath);
+				} else {
+					const existing = this.vault.getAbstractFileByPath(destinationPath);
+					if (existing instanceof TFile) {
+						const existingBinary = await this.vault.readBinary(existing);
+						const existingBroken = this.isLikelyCorruptedImageData(
+							existingBinary,
+							existing.extension,
+						);
+						const sourceLooksValid = !this.isLikelyCorruptedImageData(
+							sourceBinary,
+							linkedFile.extension,
+						);
+						if (existingBroken && sourceLooksValid) {
+							await this.vault.adapter.writeBinary(destinationPath, sourceBinary);
+						}
+					}
 				}
 
 				if (content === null) {

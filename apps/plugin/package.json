@@ -1,6 +1,6 @@
 {
 	"name": "evc-team-relay",
-	"version": "1.1.7-wgwg.21",
+	"version": "1.1.7-wgwg.22",
 	"description": "Self-hosted collaboration and web publishing for Obsidian.",
 	"main": "main.js",
 	"scripts": {
