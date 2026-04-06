@@ -241,9 +241,11 @@ export class BackgroundSync extends HasLogging {
 		if (this.isPaused || this.isProcessingSync) return;
 		this.isProcessingSync = true;
 
-		// Filter for items with connected folders
+		// SyncFile items (binary attachments) use HTTP/CAS — no WS connection required.
+		// Only Document/Canvas items require an active WS-connected folder.
 		const connectableItems = this.syncQueue.filter(
-			(item) => item.sharedFolder.connected,
+			(item) =>
+				item.doc instanceof SyncFile || item.sharedFolder.connected,
 		);
 
 		while (
@@ -373,9 +375,10 @@ export class BackgroundSync extends HasLogging {
 		if (this.isPaused || this.isProcessingDownloads) return;
 		this.isProcessingDownloads = true;
 
-		// Filter for items with connected folders
+		// SyncFile items (binary attachments) use HTTP/CAS — no WS connection required.
 		const connectableItems = this.downloadQueue.filter(
-			(item) => item.sharedFolder.connected,
+			(item) =>
+				item.doc instanceof SyncFile || item.sharedFolder.connected,
 		);
 
 		while (

@@ -1771,7 +1771,7 @@ export class SharedFolder extends HasProvider {
 		return file;
 	}
 
-	uploadFile(tfile: TAbstractFile, update = true): IFile {
+	uploadFile(tfile: TAbstractFile, update = true): IFile | null {
 		const vpath = this.getVirtualPath(tfile.path);
 		if (tfile instanceof TFolder) {
 			return this.getSyncFolder(vpath, update);
@@ -1785,8 +1785,11 @@ export class SharedFolder extends HasProvider {
 			if (this.syncStore.canSync(vpath)) {
 				return this.uploadSyncFile(vpath, update);
 			}
+			this.log(`uploadFile: unsupported type, skipping ${vpath}`);
+			return null;
 		}
-		throw new Error("unexpectedly unable to upload");
+		this.log(`uploadFile: not a file or folder, skipping ${vpath}`);
+		return null;
 	}
 
 	markPendingDelete(vpath: string) {
