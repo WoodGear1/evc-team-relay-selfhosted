@@ -519,6 +519,39 @@ export class SharedFolder extends HasProvider {
 		});
 	}
 
+	private logAttachmentDebugSummary(stage: string) {
+		const localImgPaths: string[] = [];
+		for (const tfile of this.getSyncFiles()) {
+			if (!(tfile instanceof TFile)) continue;
+			const vpath = this.getVirtualPath(tfile.path);
+			if (vpath.toLowerCase().startsWith("img/")) {
+				localImgPaths.push(vpath);
+			}
+		}
+
+		const metaImgPaths: string[] = [];
+		const pendingImgPaths: string[] = [];
+		this.syncStore.forEach((meta, path) => {
+			if (!path.toLowerCase().startsWith("img/")) return;
+			metaImgPaths.push(path);
+		});
+		for (const path of this.pendingUpload.keys()) {
+			if (!path.toLowerCase().startsWith("img/")) continue;
+			pendingImgPaths.push(path);
+		}
+
+		console.log("[Relay:attachment] folder:summary", {
+			stage,
+			sharedFolder: this.path,
+			localImages: localImgPaths.length,
+			metaImages: metaImgPaths.length,
+			pendingImages: pendingImgPaths.length,
+			localSample: localImgPaths.slice(0, 10),
+			metaSample: metaImgPaths.slice(0, 10),
+			pendingSample: pendingImgPaths.slice(0, 10),
+		});
+	}
+
 	public get shouldConnect(): boolean {
 		return this._shouldConnect;
 	}
@@ -533,13 +566,18 @@ export class SharedFolder extends HasProvider {
 
 	async netSync() {
 		await this.whenReady();
+		this.logAttachmentDebugSummary("before-provider-sync");
 		// Wait for provider to fully sync remote state before reconciling.
 		// Without this, cleanupExtraLocalFiles may see incomplete remote state
 		// and delete files that exist on the server but haven't been received yet.
 		await this.onceProviderSynced();
+		this.logAttachmentDebugSummary("after-provider-sync");
 		this.addLocalDocs();
+		this.logAttachmentDebugSummary("after-add-local-docs");
 		await this.syncFileTree(this.syncStore);
+		this.logAttachmentDebugSummary("after-sync-file-tree");
 		this.backgroundSync.enqueueSharedFolderSync(this);
+		this.logAttachmentDebugSummary("after-enqueue-shared-folder-sync");
 	}
 
 	public get settings(): SharedFolderSettings {

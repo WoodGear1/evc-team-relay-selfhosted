@@ -17,6 +17,10 @@ import { getMimeType } from "./mimetypes";
 import { flags } from "./flagManager";
 import { dirname } from "path-browserify";
 
+function isDebugAttachmentPath(path: string): boolean {
+	return path.toLowerCase().startsWith("img/");
+}
+
 export function isSyncFile(file: IFile | undefined): file is SyncFile {
 	return !!file && file instanceof SyncFile;
 }
@@ -371,22 +375,54 @@ export class SyncFile
 
 	public async push(force = false) {
 		this.log("push");
+		if (isDebugAttachmentPath(this.path)) {
+			console.log("[Relay:attachment] push:start", {
+				path: this.path,
+				force,
+				connected: this.sharedFolder.connected,
+			});
+		}
 		if (!this.sharedFolder.connected) {
 			this.log("skipping push -- folder is disconnected");
+			if (isDebugAttachmentPath(this.path)) {
+				console.warn("[Relay:attachment] push:skip-disconnected", {
+					path: this.path,
+				});
+			}
 			return;
 		}
 		if (!this.sharedFolder.syncStore.canSync(this.path)) {
 			this.log("skipping push -- filetype is disabled");
+			if (isDebugAttachmentPath(this.path)) {
+				console.warn("[Relay:attachment] push:skip-disabled", {
+					path: this.path,
+				});
+			}
 			return;
 		}
 		const hash = await this.caf.hash();
 		this._refreshMeta();
+		if (isDebugAttachmentPath(this.path)) {
+			console.log("[Relay:attachment] push:state", {
+				path: this.path,
+				hash,
+				localMtime: this.caf.modifiedAt,
+				metaHash: this.meta?.hash ?? null,
+				metaSynctime: this.meta?.synctime ?? null,
+			});
+		}
 		if (!this.meta || (hash && this.meta.hash !== hash) || force) {
 			try {
 				await this.sharedFolder.cas.writeFile(this);
 				await this.sharedFolder.markUploaded(this);
 				this.uploadError = undefined;
 				this.notifyListeners();
+				if (isDebugAttachmentPath(this.path)) {
+					console.log("[Relay:attachment] push:success", {
+						path: this.path,
+						hash,
+					});
+				}
 			} catch (error: unknown) {
 				let errorMessage = "Failed to push file";
 				try {
@@ -396,7 +432,19 @@ export class SyncFile
 				}
 				this.uploadError = errorMessage.replace(/^Error:/, "").trim();
 				this.notifyListeners();
+				if (isDebugAttachmentPath(this.path)) {
+					console.error("[Relay:attachment] push:error", {
+						path: this.path,
+						hash,
+						error: this.uploadError,
+					});
+				}
 			}
+		} else if (isDebugAttachmentPath(this.path)) {
+			console.log("[Relay:attachment] push:skip-up-to-date", {
+				path: this.path,
+				hash,
+			});
 		}
 		return;
 	}
@@ -404,14 +452,33 @@ export class SyncFile
 	public async sync() {
 		this.log("sync");
 		this._refreshMeta();
+		if (isDebugAttachmentPath(this.path)) {
+			console.log("[Relay:attachment] sync:start", {
+				path: this.path,
+				hasLocal: this.caf.exists(),
+				metaHash: this.meta?.hash ?? null,
+				metaSynctime: this.meta?.synctime ?? null,
+			});
+		}
 
 		if (!this.caf.exists()) {
 			if (!this.meta) {
 				throw new Error("unexpected case");
 			}
+			if (isDebugAttachmentPath(this.path)) {
+				console.log("[Relay:attachment] sync:missing-local-pull", {
+					path: this.path,
+					metaHash: this.meta.hash,
+				});
+			}
 			await this.pull();
 			return;
 		} else if (!this.meta) {
+			if (isDebugAttachmentPath(this.path)) {
+				console.log("[Relay:attachment] sync:missing-meta-push", {
+					path: this.path,
+				});
+			}
 			await this.push();
 			return;
 		}
@@ -432,6 +499,15 @@ export class SyncFile
 			if (hash !== this.meta.hash) {
 				// local is newer
 				if (this.stat.mtime > this.meta.synctime) {
+					if (isDebugAttachmentPath(this.path)) {
+						console.log("[Relay:attachment] sync:local-newer-push", {
+							path: this.path,
+							hash,
+							metaHash: this.meta.hash,
+							localMtime: this.stat.mtime,
+							metaSynctime: this.meta.synctime,
+						});
+					}
 					await this.push();
 					return;
 				}
@@ -442,11 +518,32 @@ export class SyncFile
 					this.meta?.synctime,
 					this.stat.mtime,
 				);
+				if (isDebugAttachmentPath(this.path)) {
+					console.log("[Relay:attachment] sync:remote-newer-pull", {
+						path: this.path,
+						hash,
+						metaHash: this.meta.hash,
+						localMtime: this.stat.mtime,
+						metaSynctime: this.meta.synctime,
+					});
+				}
 				await this.pull();
 				return;
 			}
+			if (isDebugAttachmentPath(this.path)) {
+				console.log("[Relay:attachment] sync:already-matching", {
+					path: this.path,
+					hash,
+				});
+			}
 		} catch (err: unknown) {
 			this.warn("unable to compute hash", err);
+			if (isDebugAttachmentPath(this.path)) {
+				console.error("[Relay:attachment] sync:hash-error", {
+					path: this.path,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
 		}
 	}
 
@@ -470,9 +567,23 @@ export class SyncFile
 		if (!this.meta) {
 			throw new Error("cannot pull without meta");
 		}
+		if (isDebugAttachmentPath(this.path)) {
+			console.log("[Relay:attachment] pull:start", {
+				path: this.path,
+				metaHash: this.meta.hash,
+				metaSynctime: this.meta.synctime,
+				hasLocal: this.caf.exists(),
+			});
+		}
 		if (this.caf.exists()) {
 			const hash = await this.caf.hash();
 			if (hash === this.meta.hash) {
+				if (isDebugAttachmentPath(this.path)) {
+					console.log("[Relay:attachment] pull:skip-already-matching", {
+						path: this.path,
+						hash,
+					});
+				}
 				return;
 			}
 		}
@@ -487,8 +598,21 @@ export class SyncFile
 				content,
 			);
 			await this.caf.hash();
+			if (isDebugAttachmentPath(this.path)) {
+				console.log("[Relay:attachment] pull:success", {
+					path: this.path,
+					bytes: content.byteLength,
+					targetPath: this.sharedFolder.getPath(this.path),
+				});
+			}
 		} catch (e: unknown) {
 			this.error("pull failed", e);
+			if (isDebugAttachmentPath(this.path)) {
+				console.error("[Relay:attachment] pull:error", {
+					path: this.path,
+					error: e instanceof Error ? e.message : String(e),
+				});
+			}
 			throw e;
 		}
 	}

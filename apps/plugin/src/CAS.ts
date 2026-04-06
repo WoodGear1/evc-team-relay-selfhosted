@@ -33,6 +33,14 @@ export class ContentAddressedStore extends HasLogging {
 			method: "HEAD",
 			headers: { Authorization: `Bearer ${token.token}` },
 		});
+		if (syncFile.path.toLowerCase().startsWith("img/")) {
+			console.log("[Relay:attachment] cas:verify", {
+				path: syncFile.path,
+				hash: sha256,
+				status: response.status,
+				baseUrl: token.baseUrl,
+			});
+		}
 		return response.status === 200;
 	}
 
@@ -51,6 +59,14 @@ export class ContentAddressedStore extends HasLogging {
 			method: "GET",
 			headers: { Authorization: `Bearer ${token.token}` },
 		});
+		if (syncFile.path.toLowerCase().startsWith("img/")) {
+			console.log("[Relay:attachment] cas:download-url", {
+				path: syncFile.path,
+				hash: sha256,
+				status: response.status,
+				baseUrl: token.baseUrl,
+			});
+		}
 		if (response.status === 404) {
 			throw new Error(
 				`[${this.sharedFolder.path}] File is missing: ${syncFile.guid} ${syncFile.meta.hash} ${syncFile.meta.type}`,
@@ -64,6 +80,13 @@ export class ContentAddressedStore extends HasLogging {
 		const responseJson = await response.json();
 		const presignedUrl = responseJson.downloadUrl;
 		const downloadResponse = await customFetch(presignedUrl);
+		if (syncFile.path.toLowerCase().startsWith("img/")) {
+			console.log("[Relay:attachment] cas:download", {
+				path: syncFile.path,
+				hash: sha256,
+				status: downloadResponse.status,
+			});
+		}
 		if (!downloadResponse.ok) {
 			throw new Error(
 				`[${this.sharedFolder.path}] Download failed for ${syncFile.path}: ${downloadResponse.status}`,
@@ -89,6 +112,16 @@ export class ContentAddressedStore extends HasLogging {
 			method: "POST",
 			headers: { Authorization: `Bearer ${token.token}` },
 		});
+		if (syncFile.path.toLowerCase().startsWith("img/")) {
+			console.log("[Relay:attachment] cas:upload-url", {
+				path: syncFile.path,
+				hash,
+				status: response.status,
+				baseUrl: token.baseUrl,
+				size: content.byteLength,
+				contentType: syncFile.mimetype,
+			});
+		}
 		const responseJson = await response.json();
 		if (response.status !== 200) {
 			throw new Error(responseJson.error);
@@ -99,6 +132,14 @@ export class ContentAddressedStore extends HasLogging {
 			headers: { "Content-Type": syncFile.mimetype },
 			body: content,
 		});
+		if (syncFile.path.toLowerCase().startsWith("img/")) {
+			console.log("[Relay:attachment] cas:upload", {
+				path: syncFile.path,
+				hash,
+				status: uploadResponse.status,
+				size: content.byteLength,
+			});
+		}
 		if (!uploadResponse.ok) {
 			throw new Error(
 				`Upload failed for ${syncFile.path}: ${uploadResponse.status}`,

@@ -1109,6 +1109,33 @@ export default class Live extends Plugin {
 													`Syncing... migrated ${migratedEmbeds} attachment links`,
 												);
 											}
+											const attachmentLocalPaths: string[] = [];
+											const attachmentMetaPaths: string[] = [];
+											const attachmentPendingPaths: string[] = [];
+											const localSyncFiles =
+												(folder.files ? [...folder.files.values()] : []).filter(isSyncFile);
+											for (const file of localSyncFiles) {
+												if (file.path.toLowerCase().startsWith("img/")) {
+													attachmentLocalPaths.push(file.path);
+												}
+											}
+											folder.syncStore.forEach((meta, path) => {
+												if (!path.toLowerCase().startsWith("img/")) return;
+												attachmentMetaPaths.push(path);
+											});
+											for (const path of folder.syncStore.pendingUpload.keys()) {
+												if (!path.toLowerCase().startsWith("img/")) continue;
+												attachmentPendingPaths.push(path);
+											}
+											console.log("[Relay:attachment] sync:folder-click-summary", {
+												sharedFolder: folder.path,
+												localImages: attachmentLocalPaths.length,
+												metaImages: attachmentMetaPaths.length,
+												pendingImages: attachmentPendingPaths.length,
+												localSample: attachmentLocalPaths.slice(0, 10),
+												metaSample: attachmentMetaPaths.slice(0, 10),
+												pendingSample: attachmentPendingPaths.slice(0, 10),
+											});
 											// 1. Fire CRDT sync (non-blocking)
 											if (folder.relayId && folder.connected) {
 												console.log("[Relay:sync] starting CRDT sync");

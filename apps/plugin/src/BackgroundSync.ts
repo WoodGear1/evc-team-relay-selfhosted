@@ -220,6 +220,13 @@ export class BackgroundSync extends HasLogging {
 				syncPromise
 					.then(() => {
 						item.status = "completed";
+						if (doc instanceof SyncFile && doc.path.toLowerCase().startsWith("img/")) {
+							console.log("[Relay:attachment] queue:sync-complete", {
+								path: doc.path,
+								guid: doc.guid,
+								sharedFolder: item.sharedFolder.path,
+							});
+						}
 						const callback = this.syncCompletionCallbacks.get(item.guid);
 						if (callback) {
 							callback.resolve();
@@ -251,6 +258,14 @@ export class BackgroundSync extends HasLogging {
 					})
 					.catch((error: unknown) => {
 						item.status = "failed";
+						if (doc instanceof SyncFile && doc.path.toLowerCase().startsWith("img/")) {
+							console.error("[Relay:attachment] queue:sync-failed", {
+								path: doc.path,
+								guid: doc.guid,
+								sharedFolder: item.sharedFolder.path,
+								error: error instanceof Error ? error.message : String(error),
+							});
+						}
 
 						const callback = this.syncCompletionCallbacks.get(item.guid);
 						if (callback) {
@@ -341,6 +356,13 @@ export class BackgroundSync extends HasLogging {
 				downloadPromise
 					.then(() => {
 						item.status = "completed";
+						if (item.doc instanceof SyncFile && item.doc.path.toLowerCase().startsWith("img/")) {
+							console.log("[Relay:attachment] queue:download-complete", {
+								path: item.doc.path,
+								guid: item.doc.guid,
+								sharedFolder: item.sharedFolder.path,
+							});
+						}
 
 						const callback = this.downloadCompletionCallbacks.get(item.guid);
 						if (callback) {
@@ -360,6 +382,14 @@ export class BackgroundSync extends HasLogging {
 					})
 					.catch((error: unknown) => {
 						item.status = "failed";
+						if (item.doc instanceof SyncFile && item.doc.path.toLowerCase().startsWith("img/")) {
+							console.error("[Relay:attachment] queue:download-failed", {
+								path: item.doc.path,
+								guid: item.doc.guid,
+								sharedFolder: item.sharedFolder.path,
+								error: error instanceof Error ? error.message : String(error),
+							});
+						}
 
 						const callback = this.downloadCompletionCallbacks.get(item.guid);
 						if (callback) {
@@ -573,6 +603,17 @@ export class BackgroundSync extends HasLogging {
 		const canvases = [...sharedFolder.files.values()].filter(isCanvas);
 		const syncFiles = [...sharedFolder.files.values()].filter(isSyncFile);
 		const allItems = [...docs, ...canvases, ...syncFiles];
+		const attachmentPaths = syncFiles
+			.map((file) => file.path)
+			.filter((path) => path.toLowerCase().startsWith("img/"));
+		console.log("[Relay:attachment] queue:folder-sync", {
+			sharedFolder: sharedFolder.path,
+			docs: docs.length,
+			canvases: canvases.length,
+			syncFiles: syncFiles.length,
+			imageSyncFiles: attachmentPaths.length,
+			imageSample: attachmentPaths.slice(0, 10),
+		});
 
 		// Create sync group with properly initialized counters
 		const group: SyncGroup = {
@@ -655,6 +696,13 @@ export class BackgroundSync extends HasLogging {
 		});
 
 		this.syncQueue.push(queueItem);
+		if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+			console.log("[Relay:attachment] queue:enqueue-sync", {
+				path: item.path,
+				guid: item.guid,
+				sharedFolder: sharedFolder.path,
+			});
+		}
 		this.syncQueue.sort(compareFilePaths);
 		void this.processSyncQueue();
 
