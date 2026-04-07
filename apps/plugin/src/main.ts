@@ -1782,6 +1782,49 @@ export default class Live extends Plugin {
 		return null;
 	}
 
+	private async isLocallyReferencedImageElsewhere(
+		targetPath: string,
+		excludeNotePath?: string,
+	): Promise<boolean> {
+		const normalizedTargetPath = normalizePath(targetPath);
+		for (const file of this.vault.getMarkdownFiles()) {
+			if (excludeNotePath && file.path === excludeNotePath) {
+				continue;
+			}
+			const embeds = this.app.metadataCache.getFileCache(file)?.embeds ?? [];
+			for (const embed of embeds) {
+				const linkedFile = this.resolveEmbedTargetFile(file, embed.link);
+				if (!(linkedFile instanceof TFile)) {
+					continue;
+				}
+				if (normalizePath(linkedFile.path) === normalizedTargetPath) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private async cleanupLocalImageCopyIfUnused(
+		file: TFile,
+		excludeNotePath?: string,
+	): Promise<boolean> {
+		const normalizedPath = normalizePath(file.path);
+		if (await this.isLocallyReferencedImageElsewhere(normalizedPath, excludeNotePath)) {
+			return false;
+		}
+
+		await this.vault.trash(file, false);
+		if (this.isManagedAttachment(normalizedPath)) {
+			await this.removeManagedAttachment(normalizedPath);
+		}
+		console.log("[Relay:web-assets] removed-local-image-copy", {
+			path: normalizedPath,
+			excludeNotePath,
+		});
+		return true;
+	}
+
 	private rewriteManagedEmbedLink(
 		original: string,
 		sourcePath: string,
@@ -1956,6 +1999,7 @@ export default class Live extends Plugin {
 		const content = await this.vault.cachedRead(note);
 		let nextContent = content;
 		let changed = false;
+		const cleanupCandidates = new Map<string, TFile>();
 
 		for (const embed of embeds) {
 			const linkedFile = this.resolveEmbedTargetFile(note, embed.link);
@@ -1986,6 +2030,7 @@ export default class Live extends Plugin {
 			if (nextContent.includes(embed.original)) {
 				nextContent = nextContent.replace(embed.original, replacement);
 				changed = true;
+				cleanupCandidates.set(normalizePath(linkedFile.path), linkedFile);
 			}
 		}
 
@@ -1996,6 +2041,9 @@ export default class Live extends Plugin {
 		this.remoteImageRewriteInProgress.add(note.path);
 		try {
 			await this.vault.modify(note, nextContent);
+			for (const file of cleanupCandidates.values()) {
+				await this.cleanupLocalImageCopyIfUnused(file, note.path);
+			}
 			console.log("[Relay:web-assets] auto-rewrite-note", {
 				note: note.path,
 				sharedFolder: sharedFolder.path,
@@ -2175,6 +2223,7 @@ export default class Live extends Plugin {
 
 			let content: string | null = null;
 			let changed = false;
+			const migratedSourceFiles = new Map<string, TFile>();
 
 			for (const embed of embeds) {
 				const linkedFile = this.resolveEmbedTargetFile(note, embed.link);
@@ -2236,11 +2285,18 @@ export default class Live extends Plugin {
 					content = content.replace(embed.original, replacement);
 					changed = true;
 					migratedEmbeds += 1;
+					migratedSourceFiles.set(normalizePath(linkedFile.path), linkedFile);
 				}
 			}
 
 			if (changed && content !== null) {
 				await this.vault.modify(note, content);
+				for (const file of migratedSourceFiles.values()) {
+					if (sharedFolder.checkPath(file.path)) {
+						continue;
+					}
+					await this.cleanupLocalImageCopyIfUnused(file, note.path);
+				}
 			}
 		}
 
