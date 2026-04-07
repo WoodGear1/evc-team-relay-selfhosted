@@ -2501,6 +2501,20 @@ export default class Live extends Plugin {
 		new Notice(`Created ${created.name}`);
 	}
 
+	private resolveNewFolderPathInSelectedContext(folderPath: string): string {
+		const normalizedPath = normalizePath(folderPath ?? "").replace(/^\/+/, "");
+		if (!normalizedPath || normalizedPath.includes("/")) {
+			return normalizedPath;
+		}
+
+		const selectedFolder = this.resolveSelectedContextFolder();
+		if (!selectedFolder || selectedFolder.isRoot()) {
+			return normalizedPath;
+		}
+
+		return normalizePath(`${selectedFolder.path}/${normalizedPath}`);
+	}
+
 	private getAvailableNewNotePath(folderPath: string): string {
 		const baseFolder = folderPath === "/" ? "" : folderPath;
 		for (let attempt = 0; attempt < 10_000; attempt++) {
@@ -2990,6 +3004,14 @@ export default class Live extends Plugin {
 
 					// @ts-ignore
 					return old.call(this, tfile, fn, options);
+				};
+			},
+			createFolder(old: unknown) {
+				return function (this: Vault, folderPath: string) {
+					const nextPath = plugin.resolveNewFolderPathInSelectedContext(folderPath);
+					return (
+						old as (folderPath: string) => Promise<TFolder>
+					).call(this, nextPath);
 				};
 			},
 		});
