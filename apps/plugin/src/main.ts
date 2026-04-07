@@ -52,7 +52,7 @@ interface ObsidianApp {
 		removeDefaultHotkeys(id: string): boolean;
 	};
 }
-import { relative } from "path-browserify";
+import { relative, resolve as resolvePath } from "path-browserify";
 import { SharedFolder } from "./SharedFolder";
 import type { SharedFolderSettings } from "./SharedFolder";
 import { LiveViewManager } from "./LiveViews";
@@ -1770,7 +1770,9 @@ export default class Live extends Plugin {
 			}
 
 			const relativeResolved = this.vault.getAbstractFileByPath(
-				normalizePath(sourceDirectory ? `${sourceDirectory}/${candidate}` : candidate),
+				normalizePath(
+					resolvePath("/", sourceDirectory || ".", candidate).replace(/^\/+/, ""),
+				),
 			);
 			if (relativeResolved instanceof TFile) {
 				return relativeResolved;

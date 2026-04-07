@@ -1,4 +1,5 @@
 import { FileManager, TAbstractFile, TFile, TFolder, Vault, normalizePath } from "obsidian";
+import { resolve as resolvePath } from "path-browserify";
 
 interface AttachmentStateDelegate {
 	isManagedAttachment(path: string): boolean;
@@ -210,7 +211,9 @@ export class AttachmentManager {
 				return normalizePath(direct.path);
 			}
 
-			const relative = normalizePath(sourceDirectory ? `${sourceDirectory}/${item}` : item);
+			const relative = normalizePath(
+				resolvePath("/", sourceDirectory || ".", item).replace(/^\/+/, ""),
+			);
 			const relativeResolved = this.vault.getAbstractFileByPath(relative);
 			if (relativeResolved instanceof TFile) {
 				return normalizePath(relativeResolved.path);
