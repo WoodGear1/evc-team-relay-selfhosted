@@ -11,6 +11,7 @@ services:
       - /mnt/tank/docker-containers/obsidian-relay/patches/routers/published_links.py:/app/app/api/routers/published_links.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/routers/comments.py:/app/app/api/routers/comments.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/routers/document_versions.py:/app/app/api/routers/document_versions.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/routers/files.py:/app/app/api/routers/files.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/services/published_link_service.py:/app/app/services/published_link_service.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/services/comment_service.py:/app/app/services/comment_service.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/services/document_version_service.py:/app/app/services/document_version_service.py:ro
