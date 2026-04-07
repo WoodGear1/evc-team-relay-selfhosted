@@ -1106,6 +1106,8 @@ export default class Live extends Plugin {
 												await this.migrateManagedAttachmentsForSharedFolder(folder);
 											const attachmentStats =
 												await this.syncReferencedImages(folder);
+											const remoteImageStats =
+												await this.syncRemoteImageLinksForSharedFolder(folder);
 											if (migratedEmbeds > 0) {
 												syncNotice.setMessage(
 													`Syncing... migrated ${migratedEmbeds} attachment links`,
@@ -1161,6 +1163,14 @@ export default class Live extends Plugin {
 											lines.push(
 												`Images: ${attachmentStats.verified} available, ${attachmentStats.uploaded} uploaded, ${attachmentStats.failed} failed`,
 											);
+											if (remoteImageStats.uploadedAssets > 0 || remoteImageStats.rewrittenNotes > 0) {
+												lines.push(
+													`Remote images: ${remoteImageStats.uploadedAssets} uploaded, ${remoteImageStats.rewrittenNotes} notes rewritten`,
+												);
+											}
+											if (remoteImageStats.deletedAssets > 0) {
+												lines.push(`Remote deleted: ${remoteImageStats.deletedAssets}`);
+											}
 											if (stats.skipped > 0) lines.push(`Skipped: ${stats.skipped}`);
 											if (stats.failed > 0) lines.push(`Failed: ${stats.failed}`);
 											console.log("[Relay:sync] done:", JSON.stringify(stats));
@@ -1554,6 +1564,7 @@ export default class Live extends Plugin {
 					const folder = this.sharedFolders.find(sf => sf.guid === share.id);
 					if (folder) {
 						await this.migrateManagedAttachmentsForSharedFolder(folder);
+						await this.syncRemoteImageLinksForSharedFolder(folder);
 						void folder.connect();
 						relaySynced++;
 					}
@@ -1662,6 +1673,10 @@ export default class Live extends Plugin {
 				activeFile.path.startsWith(s.path + "/")
 			);
 			if (folderShare && folderShare.web_slug) {
+				const sharedFolder = this.sharedFolders.find((sf) => sf.guid === folderShare.id);
+				if (sharedFolder) {
+					await this.syncRemoteImageLinksForSharedFolder(sharedFolder);
+				}
 				const content = await this.vault.read(activeFile);
 				const relativePath = activeFile.path.substring(folderShare.path.length + 1);
 				await this.shareClientManager.syncFolderFileContent(
@@ -1755,6 +1770,221 @@ export default class Live extends Plugin {
 				: `![[${relativeTargetPath}]]`;
 		}
 		return original.replace(/\(([^)]+)\)/, `(${relativeTargetPath})`);
+	}
+
+	private rewriteEmbedLinkToRemoteUrl(original: string, remoteUrl: string): string {
+		if (original.startsWith("![[") && original.endsWith("]]")) {
+			const inner = original.slice(3, -2);
+			const aliasIndex = inner.indexOf("|");
+			const alt = aliasIndex >= 0 ? inner.slice(aliasIndex + 1).trim() : "";
+			return alt ? `![${alt}](${remoteUrl})` : `![](${remoteUrl})`;
+		}
+		const markdownImageMatch = original.match(/^!\[([^\]]*)\]\([^)]+\)$/);
+		if (markdownImageMatch) {
+			const alt = markdownImageMatch[1]?.trim() ?? "";
+			return `![${alt}](${remoteUrl})`;
+		}
+		return `![](${remoteUrl})`;
+	}
+
+	private getWebAssetContentType(file: TFile): string {
+		switch (file.extension.toLowerCase()) {
+			case "png":
+				return "image/png";
+			case "jpg":
+			case "jpeg":
+				return "image/jpeg";
+			case "gif":
+				return "image/gif";
+			case "webp":
+				return "image/webp";
+			case "svg":
+				return "image/svg+xml";
+			case "bmp":
+				return "image/bmp";
+			case "ico":
+				return "image/x-icon";
+			case "avif":
+				return "image/avif";
+			default:
+				return "application/octet-stream";
+		}
+	}
+
+	private arrayBufferToBase64(bytes: ArrayBuffer): string {
+		const view = new Uint8Array(bytes);
+		const chunkSize = 0x8000;
+		let binary = "";
+		for (let idx = 0; idx < view.length; idx += chunkSize) {
+			binary += String.fromCharCode(...view.subarray(idx, idx + chunkSize));
+		}
+		return btoa(binary);
+	}
+
+	private getWebAssetUrl(baseUrl: string, slug: string, assetPath: string): string {
+		const params = new URLSearchParams({ path: assetPath });
+		return `${baseUrl}/v1/web/shares/${slug}/assets?${params.toString()}`;
+	}
+
+	private extractRemoteAssetPathsFromMarkdown(
+		content: string,
+		baseUrl: string,
+		slug: string,
+	): Set<string> {
+		const discovered = new Set<string>();
+		const targetUrl = new URL(`${baseUrl}/v1/web/shares/${slug}/assets`);
+		const imagePattern = /!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g;
+		for (const match of content.matchAll(imagePattern)) {
+			const candidate = match[1];
+			if (!candidate) continue;
+			try {
+				const parsed = new URL(candidate);
+				if (
+					parsed.origin !== targetUrl.origin ||
+					parsed.pathname !== targetUrl.pathname
+				) {
+					continue;
+				}
+				const assetPath = parsed.searchParams.get("path");
+				if (assetPath) {
+					discovered.add(normalizePath(assetPath));
+				}
+			} catch {
+				continue;
+			}
+		}
+		return discovered;
+	}
+
+	private async getPublishedFolderShareContext(sharedFolder: SharedFolder): Promise<{
+		client: RelayOnPremShareClient;
+		baseUrl: string;
+		webSlug: string;
+	} | null> {
+		if (!this.shareClientManager || !sharedFolder.guid || !sharedFolder.settings?.onpremServerId) {
+			return null;
+		}
+		const serverId = sharedFolder.settings.onpremServerId;
+		const client = this.shareClientManager.getClient(serverId);
+		if (!client) {
+			return null;
+		}
+		const share = await this.shareClientManager.getShare(serverId, sharedFolder.guid).catch(() => null);
+		if (!share || share.kind !== "folder" || !share.web_published || !share.web_slug) {
+			return null;
+		}
+		return {
+			client,
+			baseUrl: client.getBaseUrl(),
+			webSlug: share.web_slug,
+		};
+	}
+
+	private async syncRemoteImageLinksForSharedFolder(
+		sharedFolder: SharedFolder,
+	): Promise<{ rewrittenNotes: number; uploadedAssets: number; deletedAssets: number }> {
+		const context = await this.getPublishedFolderShareContext(sharedFolder);
+		if (!context) {
+			return { rewrittenNotes: 0, uploadedAssets: 0, deletedAssets: 0 };
+		}
+
+		const markdownFiles = this.vault
+			.getMarkdownFiles()
+			.filter((file) => sharedFolder.checkPath(file.path));
+		const uploadedAssets = new Set<string>();
+		const previousReferencedAssets = new Set<string>();
+		const nextReferencedAssets = new Set<string>();
+		let rewrittenNotes = 0;
+
+		for (const note of markdownFiles) {
+			const cache = this.app.metadataCache.getFileCache(note);
+			const embeds = cache?.embeds ?? [];
+			let content = await this.vault.cachedRead(note);
+			this.extractRemoteAssetPathsFromMarkdown(
+				content,
+				context.baseUrl,
+				context.webSlug,
+			).forEach((assetPath) => previousReferencedAssets.add(assetPath));
+
+			let nextContent = content;
+			let changed = false;
+			for (const embed of embeds) {
+				const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
+					embed.link,
+					note.path,
+				);
+				if (!(linkedFile instanceof TFile)) {
+					continue;
+				}
+				if (!sharedFolder.checkPath(linkedFile.path)) {
+					continue;
+				}
+				if (!this.attachmentManager.isImageFilename(linkedFile.name)) {
+					continue;
+				}
+
+				const assetPath = normalizePath(sharedFolder.getVirtualPath(linkedFile.path));
+				if (!uploadedAssets.has(assetPath)) {
+					const binary = await this.vault.readBinary(linkedFile);
+					await context.client.uploadWebAsset(context.webSlug, {
+						path: assetPath,
+						data: this.arrayBufferToBase64(binary),
+						content_type: this.getWebAssetContentType(linkedFile),
+					});
+					uploadedAssets.add(assetPath);
+				}
+
+				const remoteUrl = this.getWebAssetUrl(
+					context.baseUrl,
+					context.webSlug,
+					assetPath,
+				);
+				const replacement = this.rewriteEmbedLinkToRemoteUrl(embed.original, remoteUrl);
+				if (nextContent.includes(embed.original)) {
+					nextContent = nextContent.replace(embed.original, replacement);
+					changed = true;
+				}
+			}
+
+			this.extractRemoteAssetPathsFromMarkdown(
+				nextContent,
+				context.baseUrl,
+				context.webSlug,
+			).forEach((assetPath) => nextReferencedAssets.add(assetPath));
+
+			if (changed && nextContent !== content) {
+				await this.vault.modify(note, nextContent);
+				rewrittenNotes += 1;
+			}
+		}
+
+		let deletedAssets = 0;
+		for (const assetPath of previousReferencedAssets) {
+			if (nextReferencedAssets.has(assetPath)) {
+				continue;
+			}
+			await context.client.deleteWebAsset(context.webSlug, assetPath).catch((error) => {
+				console.warn("[Relay:web-assets] delete failed", {
+					sharedFolder: sharedFolder.path,
+					assetPath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+			deletedAssets += 1;
+		}
+
+		console.log("[Relay:web-assets] remote-image-mode", {
+			sharedFolder: sharedFolder.path,
+			rewrittenNotes,
+			uploadedAssets: uploadedAssets.size,
+			deletedAssets,
+		});
+
+		return {
+			rewrittenNotes,
+			uploadedAssets: uploadedAssets.size,
+			deletedAssets,
+		};
 	}
 
 	private isLikelyCorruptedImageData(bytes: ArrayBuffer, extension: string): boolean {

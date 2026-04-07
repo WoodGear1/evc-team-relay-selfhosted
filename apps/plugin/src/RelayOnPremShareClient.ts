@@ -74,6 +74,12 @@ export interface FolderItem {
 	type: "doc" | "folder" | "canvas";
 }
 
+export interface WebAssetUploadRequest {
+	path: string;
+	data: string;
+	content_type: string;
+}
+
 /**
  * Request to update a share
  */
@@ -458,6 +464,10 @@ export class RelayOnPremShareClient {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${token}`,
 		};
+	}
+
+	getBaseUrl(): string {
+		return this.normalizedUrl;
 	}
 
 	/**
@@ -963,6 +973,44 @@ export class RelayOnPremShareClient {
 		} catch (error: unknown) {
 			log("Error syncing folder file content:", error);
 			throw error;
+		}
+	}
+
+	async uploadWebAsset(
+		slug: string,
+		request: WebAssetUploadRequest,
+	): Promise<void> {
+		log(`Uploading web asset: ${slug}${request.path}`);
+
+		const response = await customFetch(
+			`${this.normalizedUrl}/v1/web/shares/${slug}/assets`,
+			{
+				method: "POST",
+				headers: await this.getHeaders(),
+				body: JSON.stringify(request),
+			},
+		);
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Failed to upload web asset: ${response.status} ${errorText}`);
+		}
+	}
+
+	async deleteWebAsset(slug: string, path: string): Promise<void> {
+		log(`Deleting web asset: ${slug}${path}`);
+
+		const response = await customFetch(
+			`${this.normalizedUrl}/v1/web/shares/${slug}/assets?path=${encodeURIComponent(path)}`,
+			{
+				method: "DELETE",
+				headers: await this.getHeaders(),
+			},
+		);
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Failed to delete web asset: ${response.status} ${errorText}`);
 		}
 	}
 
