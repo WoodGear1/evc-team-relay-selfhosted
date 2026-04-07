@@ -90,14 +90,14 @@ export class AttachmentManager {
 	async captureInitialReferences(file: TFile): Promise<void> {
 		if (file.extension !== "md") return;
 		const content = await this.vault.cachedRead(file);
-		this.noteReferenceSnapshots.set(file.path, this.extractManagedReferences(content));
+		this.noteReferenceSnapshots.set(file.path, this.extractManagedReferences(content, file.path));
 	}
 
 	async handleNoteModified(file: TFile): Promise<void> {
 		if (file.extension !== "md") return;
 
 		const content = await this.vault.cachedRead(file);
-		const current = this.extractManagedReferences(content);
+		const current = this.extractManagedReferences(content, file.path);
 		const previous = this.noteReferenceSnapshots.get(file.path) ?? new Set<string>();
 
 		this.noteReferenceSnapshots.set(file.path, current);
@@ -160,25 +160,64 @@ export class AttachmentManager {
 		for (const file of this.vault.getMarkdownFiles()) {
 			if (file.path === sourcePath) continue;
 			const content = await this.vault.cachedRead(file);
-			if (content.includes(assetPath)) {
+			if (this.extractManagedReferences(content, file.path).has(assetPath)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private extractManagedReferences(content: string): Set<string> {
+	private extractManagedReferences(content: string, sourcePath: string): Set<string> {
 		const matches = new Set<string>();
-		const pathRegex = /\bimg\/[^\s\]\)\|>]+/g;
+		const sourceDirectory = sourcePath.split("/").slice(0, -1).join("/");
+		const candidates = new Set<string>();
 
-		for (const match of content.matchAll(pathRegex)) {
-			const path = normalizePath(match[0]);
-			if (this.state.isManagedAttachment(path)) {
-				matches.add(path);
+		for (const match of content.matchAll(/!\[\[([^\]]+)\]\]/g)) {
+			const inner = match[1]?.trim();
+			if (!inner) continue;
+			candidates.add(inner.split("|")[0]?.trim() ?? "");
+		}
+
+		for (const match of content.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
+			const raw = match[1]?.trim();
+			if (!raw || /^https?:\/\//i.test(raw)) continue;
+			candidates.add(raw);
+		}
+
+		for (const candidate of candidates) {
+			if (!candidate) continue;
+			const resolved = this.resolveManagedReferencePath(candidate, sourceDirectory);
+			if (resolved && this.state.isManagedAttachment(resolved)) {
+				matches.add(resolved);
 			}
 		}
 
 		return matches;
+	}
+
+	private resolveManagedReferencePath(candidate: string, sourceDirectory: string): string | null {
+		const possibilities = new Set<string>([candidate]);
+		try {
+			possibilities.add(decodeURIComponent(candidate));
+		} catch {
+			// Ignore malformed URI sequences and keep the original candidate.
+		}
+
+		for (const item of possibilities) {
+			const normalized = normalizePath(item);
+			const direct = this.vault.getAbstractFileByPath(normalized);
+			if (direct instanceof TFile) {
+				return normalizePath(direct.path);
+			}
+
+			const relative = normalizePath(sourceDirectory ? `${sourceDirectory}/${item}` : item);
+			const relativeResolved = this.vault.getAbstractFileByPath(relative);
+			if (relativeResolved instanceof TFile) {
+				return normalizePath(relativeResolved.path);
+			}
+		}
+
+		return null;
 	}
 
 	private sanitizeFilename(filename: string): string {

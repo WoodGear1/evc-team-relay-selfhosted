@@ -186,6 +186,7 @@ export default class Live extends Plugin {
 	hashStore!: ContentAddressedFileStore;
 	private managedAttachmentPaths = new Set<string>();
 	private documentVersionTimers = new Map<string, number>();
+	private remoteImageRewriteInProgress = new Set<string>();
 
 	enableDebugging(save?: boolean) {
 		setDebugging(true);
@@ -1890,6 +1891,18 @@ export default class Live extends Plugin {
 		return discovered;
 	}
 
+	private findContainingSharedFolder(filePath: string): SharedFolder | null {
+		return (
+			this.sharedFolders.lookup(filePath) ??
+			this.sharedFolders.find(
+				(sf) =>
+					normalizePath(sf.path) === normalizePath(filePath) ||
+					normalizePath(filePath).startsWith(`${normalizePath(sf.path)}/`),
+			) ??
+			null
+		);
+	}
+
 	private async getPublishedFolderShareContext(sharedFolder: SharedFolder): Promise<{
 		client: RelayOnPremShareClient;
 		baseUrl: string;
@@ -1912,6 +1925,83 @@ export default class Live extends Plugin {
 			baseUrl: client.getBaseUrl(),
 			webSlug: share.web_slug,
 		};
+	}
+
+	private async autoRewriteRemoteImagesForNote(note: TFile): Promise<boolean> {
+		if (note.extension !== "md") {
+			return false;
+		}
+		if (this.remoteImageRewriteInProgress.has(note.path)) {
+			return false;
+		}
+
+		const sharedFolder = this.findContainingSharedFolder(note.path);
+		if (!sharedFolder) {
+			return false;
+		}
+
+		const context = await this.getPublishedFolderShareContext(sharedFolder);
+		if (!context) {
+			return false;
+		}
+
+		const cache = this.app.metadataCache.getFileCache(note);
+		const embeds = cache?.embeds ?? [];
+		if (embeds.length === 0) {
+			return false;
+		}
+
+		const content = await this.vault.cachedRead(note);
+		let nextContent = content;
+		let changed = false;
+
+		for (const embed of embeds) {
+			const linkedFile = this.resolveEmbedTargetFile(note, embed.link);
+			if (!(linkedFile instanceof TFile)) {
+				continue;
+			}
+			if (!sharedFolder.checkPath(linkedFile.path)) {
+				continue;
+			}
+			if (!this.attachmentManager.isImageFilename(linkedFile.name)) {
+				continue;
+			}
+
+			const assetPath = normalizePath(sharedFolder.getVirtualPath(linkedFile.path));
+			const binary = await this.vault.readBinary(linkedFile);
+			await context.client.uploadWebAsset(context.webSlug, {
+				path: assetPath,
+				data: this.arrayBufferToBase64(binary),
+				content_type: this.getWebAssetContentType(linkedFile),
+			});
+
+			const remoteUrl = this.getWebAssetUrl(
+				context.baseUrl,
+				context.webSlug,
+				assetPath,
+			);
+			const replacement = this.rewriteEmbedLinkToRemoteUrl(embed.original, remoteUrl);
+			if (nextContent.includes(embed.original)) {
+				nextContent = nextContent.replace(embed.original, replacement);
+				changed = true;
+			}
+		}
+
+		if (!changed || nextContent === content) {
+			return false;
+		}
+
+		this.remoteImageRewriteInProgress.add(note.path);
+		try {
+			await this.vault.modify(note, nextContent);
+			console.log("[Relay:web-assets] auto-rewrite-note", {
+				note: note.path,
+				sharedFolder: sharedFolder.path,
+			});
+			return true;
+		} finally {
+			this.remoteImageRewriteInProgress.delete(note.path);
+		}
 	}
 
 	private async syncRemoteImageLinksForSharedFolder(
@@ -2714,7 +2804,7 @@ export default class Live extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.vault.on("modify", (tfile) => {
+			this.app.vault.on("modify", async (tfile) => {
 				const folder = this.sharedFolders.lookup(tfile.path);
 				if (folder) {
 					vaultLog("Modify", tfile.path);
@@ -2735,12 +2825,23 @@ export default class Live extends Plugin {
 					}, 500);
 				}
 
+				if (tfile instanceof TFile && tfile.extension === "md") {
+					await this.attachmentManager.handleNoteModified(tfile);
+					try {
+						const rewrittenToRemote = await this.autoRewriteRemoteImagesForNote(tfile);
+						if (rewrittenToRemote) {
+							return;
+						}
+					} catch (error: unknown) {
+						console.error("[Relay:web-assets] auto rewrite failed", {
+							path: tfile.path,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
 				// Handle auto-sync to web (v1.8.1)
 				if (this.webSyncManager && tfile instanceof TFile) {
 					void this.webSyncManager.onFileModified(tfile);
-				}
-				if (tfile instanceof TFile && tfile.extension === "md") {
-					void this.attachmentManager.handleNoteModified(tfile);
 				}
 				if (tfile instanceof TFile) {
 					this.queueDocumentVersionSnapshot(tfile);
