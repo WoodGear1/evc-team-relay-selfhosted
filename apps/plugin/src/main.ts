@@ -47,6 +47,7 @@ interface ObsidianApp {
 	commands: {
 		commands: Record<string, unknown>;
 		editorCommands: Record<string, unknown>;
+		executeCommandById?: (commandId: string) => boolean | Promise<boolean>;
 	};
 	hotkeyManager: {
 		removeDefaultHotkeys(id: string): boolean;
@@ -637,6 +638,22 @@ export default class Live extends Plugin {
 						error instanceof Error
 							? error.message
 							: "Unable to create note in the selected context",
+					);
+				}
+			},
+		});
+
+		this.addCommand({
+			id: "create-folder-in-selected-context",
+			name: "Create folder in selected folder or next to selected note",
+			callback: async () => {
+				try {
+					await this.createFolderInSelectedContext();
+				} catch (error: unknown) {
+					new Notice(
+						error instanceof Error
+							? error.message
+							: "Unable to create folder in the selected context",
 					);
 				}
 			},
@@ -2450,15 +2467,18 @@ export default class Live extends Plugin {
 		return null;
 	}
 
-	private async createNoteInSelectedContext(): Promise<void> {
+	private resolveSelectedContextFolder(): TFolder | null {
 		const selected = this.getSelectedFileExplorerItem();
 		const activeFile = this.app.workspace.getActiveFile();
-		const folder =
-			selected instanceof TFolder
-				? selected
-				: selected instanceof TFile
-					? selected.parent
-					: activeFile?.parent ?? this.vault.getRoot();
+		return selected instanceof TFolder
+			? selected
+			: selected instanceof TFile
+				? selected.parent
+				: activeFile?.parent ?? this.vault.getRoot();
+	}
+
+	private async createNoteInSelectedContext(): Promise<void> {
+		const folder = this.resolveSelectedContextFolder();
 
 		if (!folder) {
 			throw new Error("Unable to resolve a folder for the new note");
@@ -2468,6 +2488,17 @@ export default class Live extends Plugin {
 		const note = await this.vault.create(path, "");
 		await this.app.workspace.getLeaf(true).openFile(note);
 		new Notice(`Created ${note.basename}`);
+	}
+
+	private async createFolderInSelectedContext(): Promise<void> {
+		const folder = this.resolveSelectedContextFolder();
+		if (!folder) {
+			throw new Error("Unable to resolve a folder for the new folder");
+		}
+
+		const path = this.getAvailableNewFolderPath(folder.path);
+		const created = await this.vault.createFolder(path);
+		new Notice(`Created ${created.name}`);
 	}
 
 	private getAvailableNewNotePath(folderPath: string): string {
@@ -2483,6 +2514,21 @@ export default class Live extends Plugin {
 		}
 
 		throw new Error("Unable to allocate a path for the new note");
+	}
+
+	private getAvailableNewFolderPath(folderPath: string): string {
+		const baseFolder = folderPath === "/" ? "" : folderPath;
+		for (let attempt = 0; attempt < 10_000; attempt++) {
+			const suffix = attempt === 0 ? "" : ` ${attempt + 1}`;
+			const candidate = normalizePath(
+				`${baseFolder ? `${baseFolder}/` : ""}Untitled folder${suffix}`,
+			);
+			if (!this.vault.getAbstractFileByPath(candidate)) {
+				return candidate;
+			}
+		}
+
+		throw new Error("Unable to allocate a path for the new folder");
 	}
 
 	private async resolveDocumentVersionContext(file: TFile): Promise<{
@@ -2968,6 +3014,30 @@ export default class Live extends Plugin {
 				};
 			},
 		});
+
+		const appAny = this.app as unknown as ObsidianApp;
+		if (appAny.commands?.executeCommandById) {
+			getPatcher().patch(appAny.commands, {
+				executeCommandById(old: unknown) {
+					return async function (
+						this: { executeCommandById?: (commandId: string) => boolean | Promise<boolean> },
+						commandId: string,
+					) {
+						if (commandId === "file-explorer:new-file") {
+							await plugin.createNoteInSelectedContext();
+							return true;
+						}
+						if (commandId === "file-explorer:new-folder") {
+							await plugin.createFolderInSelectedContext();
+							return true;
+						}
+						return await (
+							old as (commandId: string) => boolean | Promise<boolean>
+						).call(this, commandId);
+					};
+				},
+			});
+		}
 
 		this.patchWebviewer();
 
