@@ -421,14 +421,19 @@ export class Document extends HasProvider implements IFile, HasMimeType {
 	}
 
 	save() {
-		if (!this.tfile) {
+		const parent = this._parent;
+		if (!parent || parent.destroyed) {
 			return;
 		}
-		if (this.sharedFolder.isPendingDelete(this.path)) {
+		const tfile = this.tfile;
+		if (!tfile) {
+			return;
+		}
+		if (parent.isPendingDelete(this.path)) {
 			this.warn("skipping save for pending delete", this.path);
 			return;
 		}
-		void this.vault.modify(this.tfile, this.text);
+		void this.vault.modify(tfile, this.text);
 		this.warn("file saved", this.path);
 	}
 
@@ -469,6 +474,7 @@ export class Document extends HasProvider implements IFile, HasMimeType {
 	}
 
 	destroy() {
+		(this.requestSave as typeof this.requestSave & { cancel?: () => void }).cancel?.();
 		this.unsubscribes.forEach((unsubscribe) => {
 			unsubscribe();
 		});
