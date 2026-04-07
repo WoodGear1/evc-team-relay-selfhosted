@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import io
+import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -37,12 +38,31 @@ class FileTokenRequest(BaseModel):
 
 def _minio() -> Minio:
     s = get_settings()
-    return Minio(
-        s.minio_endpoint,
-        access_key=s.minio_access_key,
-        secret_key=s.minio_secret_key,
-        secure=s.minio_secure,
+    endpoint = getattr(s, "minio_endpoint", None) or os.getenv("MINIO_ENDPOINT", "minio:9000")
+    access_key = (
+        getattr(s, "minio_access_key", None)
+        or os.getenv("MINIO_ACCESS_KEY")
+        or os.getenv("MINIO_ROOT_USER", "minioadmin")
     )
+    secret_key = (
+        getattr(s, "minio_secret_key", None)
+        or os.getenv("MINIO_SECRET_KEY")
+        or os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
+    )
+    secure = getattr(s, "minio_secure", None)
+    if secure is None:
+        secure = os.getenv("MINIO_SECURE", "false").lower() in {"1", "true", "yes", "on"}
+    return Minio(
+        endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=secure,
+    )
+
+
+def _bucket_name() -> str:
+    s = get_settings()
+    return getattr(s, "minio_bucket", None) or os.getenv("MINIO_BUCKET", "relay")
 
 
 def _key(file_hash: str) -> str:
@@ -74,7 +94,9 @@ def _verify_sig(file_hash: str, action: str, sig: str, exp: int) -> None:
 
 # ── POST /file-token ───────────────────────────────────────────────
 @file_token_router.post("/file-token")
-@limiter.limit("120/minute")
+# Attachment recovery can legitimately request hundreds of file tokens in a burst.
+# Keep a limit, but high enough not to break large first-sync / migration flows.
+@limiter.limit("6000/minute")
 def create_file_token(
     request: Request,
     payload: FileTokenRequest,
@@ -107,9 +129,9 @@ def head_file(
     file_hash: str,
     current_user: models.User = Depends(deps.get_current_user),
 ):
-    s = get_settings()
+    bucket = _bucket_name()
     try:
-        _minio().stat_object(s.minio_bucket, _key(file_hash))
+        _minio().stat_object(bucket, _key(file_hash))
         return Response(status_code=200)
     except S3Error as e:
         if e.code == "NoSuchKey":
@@ -147,11 +169,11 @@ def get_upload_url(
 @files_router.get("/blob/{file_hash}")
 def download_blob(file_hash: str, sig: str, exp: int, action: str = "download"):
     _verify_sig(file_hash, action, sig, exp)
-    s = get_settings()
+    bucket = _bucket_name()
     client = _minio()
     try:
-        stat = client.stat_object(s.minio_bucket, _key(file_hash))
-        obj = client.get_object(s.minio_bucket, _key(file_hash))
+        stat = client.stat_object(bucket, _key(file_hash))
+        obj = client.get_object(bucket, _key(file_hash))
         headers: dict[str, str] = {}
         if stat.size is not None:
             headers["content-length"] = str(stat.size)
@@ -170,10 +192,10 @@ def download_blob(file_hash: str, sig: str, exp: int, action: str = "download"):
 @files_router.put("/blob/{file_hash}")
 async def upload_blob(request: Request, file_hash: str, sig: str, exp: int, action: str = "upload"):
     _verify_sig(file_hash, action, sig, exp)
-    s = get_settings()
+    bucket = _bucket_name()
     body = await request.body()
     ct = request.headers.get("content-type", "application/octet-stream")
     client = _minio()
-    _ensure_bucket(client, s.minio_bucket)
-    client.put_object(s.minio_bucket, _key(file_hash), io.BytesIO(body), len(body), content_type=ct)
+    _ensure_bucket(client, bucket)
+    client.put_object(bucket, _key(file_hash), io.BytesIO(body), len(body), content_type=ct)
     return Response(status_code=200)
