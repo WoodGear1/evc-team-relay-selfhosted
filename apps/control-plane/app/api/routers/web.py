@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import re
 from datetime import datetime
 
@@ -1310,14 +1311,33 @@ def get_robots_txt(db: Session = Depends(get_db)) -> Response:
 
 
 def _get_minio_client() -> Minio:
-    """Create MinIO client from settings."""
+    """Create MinIO client from settings or env fallback."""
     settings = get_settings()
-    return Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_secure,
+    endpoint = getattr(settings, "minio_endpoint", None) or os.getenv("MINIO_ENDPOINT", "minio:9000")
+    access_key = (
+        getattr(settings, "minio_access_key", None)
+        or os.getenv("MINIO_ACCESS_KEY")
+        or os.getenv("MINIO_ROOT_USER", "minioadmin")
     )
+    secret_key = (
+        getattr(settings, "minio_secret_key", None)
+        or os.getenv("MINIO_SECRET_KEY")
+        or os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
+    )
+    secure = getattr(settings, "minio_secure", None)
+    if secure is None:
+        secure = os.getenv("MINIO_SECURE", "false").lower() in {"1", "true", "yes", "on"}
+    return Minio(
+        endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=secure,
+    )
+
+
+def _get_minio_bucket_name() -> str:
+    settings = get_settings()
+    return getattr(settings, "minio_bucket", None) or os.getenv("MINIO_BUCKET", "relay")
 
 
 def _ensure_minio_bucket(client: Minio, bucket_name: str) -> None:
@@ -1468,7 +1488,7 @@ def upload_web_asset(
 
     # Upload to MinIO
     client = _get_minio_client()
-    bucket_name = settings.minio_bucket
+    bucket_name = _get_minio_bucket_name()
     _ensure_minio_bucket(client, bucket_name)
 
     object_name = f"web-assets/{share.id}/{payload.path}"
@@ -1523,7 +1543,7 @@ def delete_web_asset(
     _require_web_asset_access(db, request, share)
 
     client = _get_minio_client()
-    bucket_name = settings.minio_bucket
+    bucket_name = _get_minio_bucket_name()
     object_name = f"web-assets/{share.id}/{path}"
 
     try:
@@ -1574,7 +1594,7 @@ def serve_web_asset(
 
     # Read from MinIO
     client = _get_minio_client()
-    bucket_name = settings.minio_bucket
+    bucket_name = _get_minio_bucket_name()
     object_name = f"web-assets/{share.id}/{path}"
 
     try:

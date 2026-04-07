@@ -1745,6 +1745,40 @@ export default class Live extends Plugin {
 		return normalizePath(relative(sourceDirectory, targetPath));
 	}
 
+	private resolveEmbedTargetFile(note: TFile, rawLink: string): TFile | null {
+		const candidates = new Set<string>([rawLink]);
+		try {
+			candidates.add(decodeURIComponent(rawLink));
+		} catch {
+			// Ignore malformed URI fragments and keep the original link.
+		}
+
+		const sourceDirectory = note.path.split("/").slice(0, -1).join("/");
+		for (const candidate of candidates) {
+			const metadataResolved = this.app.metadataCache.getFirstLinkpathDest(
+				candidate,
+				note.path,
+			);
+			if (metadataResolved instanceof TFile) {
+				return metadataResolved;
+			}
+
+			const directResolved = this.vault.getAbstractFileByPath(normalizePath(candidate));
+			if (directResolved instanceof TFile) {
+				return directResolved;
+			}
+
+			const relativeResolved = this.vault.getAbstractFileByPath(
+				normalizePath(sourceDirectory ? `${sourceDirectory}/${candidate}` : candidate),
+			);
+			if (relativeResolved instanceof TFile) {
+				return relativeResolved;
+			}
+		}
+
+		return null;
+	}
+
 	private rewriteManagedEmbedLink(
 		original: string,
 		sourcePath: string,
@@ -1909,10 +1943,7 @@ export default class Live extends Plugin {
 			let nextContent = content;
 			let changed = false;
 			for (const embed of embeds) {
-				const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
-					embed.link,
-					note.path,
-				);
+				const linkedFile = this.resolveEmbedTargetFile(note, embed.link);
 				if (!(linkedFile instanceof TFile)) {
 					continue;
 				}
@@ -2054,10 +2085,7 @@ export default class Live extends Plugin {
 			let changed = false;
 
 			for (const embed of embeds) {
-				const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
-					embed.link,
-					note.path,
-				);
+				const linkedFile = this.resolveEmbedTargetFile(note, embed.link);
 				if (!(linkedFile instanceof TFile)) {
 					continue;
 				}
@@ -2143,10 +2171,7 @@ export default class Live extends Plugin {
 			if (!sharedFolder.checkPath(note.path)) continue;
 			const embeds = this.app.metadataCache.getFileCache(note)?.embeds ?? [];
 			for (const embed of embeds) {
-				const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
-					embed.link,
-					note.path,
-				);
+				const linkedFile = this.resolveEmbedTargetFile(note, embed.link);
 				if (!(linkedFile instanceof TFile)) continue;
 				if (!sharedFolder.checkPath(linkedFile.path)) continue;
 				if (!this.attachmentManager.isImageFilename(linkedFile.name)) continue;
