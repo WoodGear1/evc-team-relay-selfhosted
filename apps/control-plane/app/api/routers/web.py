@@ -354,26 +354,48 @@ def _build_link_public_response(
 
 @router.get("/discover")
 def discover_shares(
+    request: Request,
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """
-    List all discoverable web-published shares (public or protected).
-    Returns lightweight metadata for the home/landing page.
+    List web-published shares for the home/landing page.
+
+    Anonymous users see discoverable shares (public/protected).
+    Authenticated users additionally see private shares they own or are a member of.
     """
     settings = get_settings()
     if not settings.web_publish_enabled:
         return []
 
+    token = _request_bearer_token(request)
+    user_id = None
+    if token:
+        try:
+            user_id = _decode_web_user_id(token)
+        except Exception:
+            user_id = None
+
     stmt = select(models.Share).where(
         models.Share.web_published == True,  # noqa: E712
         models.Share.web_slug.isnot(None),
-        models.Share.visibility.in_([
-            models.ShareVisibility.PUBLIC,
-            models.ShareVisibility.PROTECTED,
-        ]),
     ).order_by(models.Share.updated_at.desc())
 
     shares = db.execute(stmt).scalars().all()
+    visible_shares: list[models.Share] = []
+    for share in shares:
+        if share.visibility in (
+            models.ShareVisibility.PUBLIC,
+            models.ShareVisibility.PROTECTED,
+        ):
+            visible_shares.append(share)
+            continue
+        if (
+            share.visibility == models.ShareVisibility.PRIVATE
+            and user_id
+            and _user_can_access_share(db, share, user_id)
+        ):
+            visible_shares.append(share)
+
     return [
         {
             "slug": s.web_slug,
@@ -386,7 +408,7 @@ def discover_shares(
             "description": None,
             "updated_at": s.updated_at.isoformat() if s.updated_at else None,
         }
-        for s in shares
+        for s in visible_shares
     ]
 
 

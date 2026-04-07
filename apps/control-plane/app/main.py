@@ -32,7 +32,7 @@ from app.api.routers import (
     web,
     webhooks,
 )
-from app.api.routers.admin_ui import AdminAuthRedirect
+from app.api.routers.admin_ui import AdminAuthRedirect, admin_ui_path
 from app.core import security
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -133,7 +133,7 @@ Get a token by calling `POST /auth/login` with valid credentials.
     # Register exception handlers (order matters - most specific first)
     # Admin UI auth redirect (must be before generic handlers)
     async def admin_auth_redirect_handler(request, exc):
-        return RedirectResponse("/admin-ui/login", status_code=302)
+        return RedirectResponse(admin_ui_path("/login"), status_code=302)
 
     app.add_exception_handler(AdminAuthRedirect, admin_auth_redirect_handler)
     app.add_exception_handler(StarletteHTTPException, errors.http_exception_handler)

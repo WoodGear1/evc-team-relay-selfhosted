@@ -57,7 +57,7 @@ export const load: LayoutServerLoad = async ({ url, cookies }) => {
 		}
 	}
 
-	const adminUrl = PUBLIC_CONTROL_PLANE_URL
+	const adminUrl = currentUser?.is_admin && PUBLIC_CONTROL_PLANE_URL
 		? `${PUBLIC_CONTROL_PLANE_URL}/v1/admin-ui`
 		: null;
 

@@ -522,11 +522,13 @@ export interface DiscoverableShare {
 }
 
 /**
- * List all discoverable (public/protected) web-published shares.
+ * List web-published shares visible to the current visitor.
  */
-export async function discoverShares(): Promise<DiscoverableShare[]> {
+export async function discoverShares(auth: WebAuthContext = {}): Promise<DiscoverableShare[]> {
 	try {
-		const response = await fetch(`${CONTROL_PLANE_URL}/v1/web/discover`);
+		const response = await fetch(`${CONTROL_PLANE_URL}/v1/web/discover`, {
+			headers: buildAuthHeaders(auth)
+		});
 		if (!response.ok) return [];
 		return response.json();
 	} catch {

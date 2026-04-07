@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin-ui", tags=["admin-ui"])
 templates = Jinja2Templates(directory="app/templates")
+ADMIN_UI_PUBLIC_PREFIX = "/v1/admin-ui"
+
+
+def admin_ui_path(path: str = "") -> str:
+    normalized = path if path.startswith("/") else f"/{path}" if path else ""
+    return f"{ADMIN_UI_PUBLIC_PREFIX}{normalized}"
 
 
 # Custom exception for admin auth redirect
@@ -94,8 +100,8 @@ def admin_ui_root(request: Request):
     """Redirect to login or dashboard."""
     token = request.cookies.get("admin_token")
     if token:
-        return RedirectResponse("/admin-ui/dashboard", status_code=302)
-    return RedirectResponse("/admin-ui/login", status_code=302)
+        return RedirectResponse(admin_ui_path("/dashboard"), status_code=302)
+    return RedirectResponse(admin_ui_path("/login"), status_code=302)
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -104,7 +110,7 @@ def login_page(request: Request, error: str | None = None):
     # If already logged in, redirect to dashboard
     token = request.cookies.get("admin_token")
     if token:
-        return RedirectResponse("/admin-ui/dashboard", status_code=302)
+        return RedirectResponse(admin_ui_path("/dashboard"), status_code=302)
 
     return render_template(request, "admin/login.html", {"error": error})
 
@@ -142,7 +148,7 @@ def login_submit(
         )
 
         # Set cookie and redirect
-        response = RedirectResponse("/admin-ui/dashboard", status_code=302)
+        response = RedirectResponse(admin_ui_path("/dashboard"), status_code=302)
         response.set_cookie(
             key="admin_token",
             value=token,
@@ -180,7 +186,7 @@ def logout(
     except Exception:
         pass  # Continue with logout even if logging fails
 
-    response = RedirectResponse("/admin-ui/login", status_code=302)
+    response = RedirectResponse(admin_ui_path("/login"), status_code=302)
     response.delete_cookie("admin_token")
     return response
 
@@ -266,11 +272,11 @@ def user_create_submit(
         )
         user_service.create_user(db, payload, actor_user_id=current_user.id)
         return RedirectResponse(
-            "/admin-ui/users?success=User created successfully", status_code=302
+            admin_ui_path("/users?success=User created successfully"), status_code=302
         )
     except HTTPException as e:
         # Return to form with error
-        return RedirectResponse(f"/admin-ui/users?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/users?error={e.detail}"), status_code=302)
 
 
 @router.get("/users/{user_id}/edit", response_class=HTMLResponse)
@@ -316,10 +322,10 @@ def user_edit_submit(
         )
         user_service.update_user(db, user_id, payload, actor_user_id=current_user.id)
         return RedirectResponse(
-            "/admin-ui/users?success=User updated successfully", status_code=302
+            admin_ui_path("/users?success=User updated successfully"), status_code=302
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/users?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/users?error={e.detail}"), status_code=302)
 
 
 @router.post("/users/{user_id}/delete", response_class=RedirectResponse)
@@ -332,10 +338,10 @@ def user_delete(
     try:
         user_service.delete_user(db, user_id, actor_user_id=current_user.id)
         return RedirectResponse(
-            "/admin-ui/users?success=User deleted successfully", status_code=302
+            admin_ui_path("/users?success=User deleted successfully"), status_code=302
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/users?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/users?error={e.detail}"), status_code=302)
 
 
 @router.post("/users/{user_id}/toggle-admin", response_class=RedirectResponse)
@@ -348,9 +354,9 @@ def user_toggle_admin(
     try:
         user_data = user_service.get_user(db, user_id)
         user_service.set_admin(db, user_id, not user_data.is_admin)
-        return RedirectResponse("/admin-ui/users?success=Admin role toggled", status_code=302)
+        return RedirectResponse(admin_ui_path("/users?success=Admin role toggled"), status_code=302)
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/users?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/users?error={e.detail}"), status_code=302)
 
 
 @router.post("/users/{user_id}/toggle-active", response_class=RedirectResponse)
@@ -364,9 +370,9 @@ def user_toggle_active(
         user_data = user_service.get_user(db, user_id)
         payload = user_schema.UserUpdate(is_active=not user_data.is_active)
         user_service.update_user(db, user_id, payload, actor_user_id=current_user.id)
-        return RedirectResponse("/admin-ui/users?success=User status toggled", status_code=302)
+        return RedirectResponse(admin_ui_path("/users?success=User status toggled"), status_code=302)
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/users?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/users?error={e.detail}"), status_code=302)
 
 
 # ==================== SHARES MANAGEMENT ====================
@@ -505,7 +511,7 @@ def share_detail(
             db=db,
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/shares?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/shares?error={e.detail}"), status_code=302)
 
 
 @router.post("/shares/{share_id}/delete", response_class=RedirectResponse)
@@ -519,10 +525,10 @@ def share_delete(
         share = share_service.get_share(db, share_id)
         share_service.delete_share(db, share, actor_user_id=current_user.id)
         return RedirectResponse(
-            "/admin-ui/shares?success=Share deleted successfully", status_code=302
+            admin_ui_path("/shares?success=Share deleted successfully"), status_code=302
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/shares?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/shares?error={e.detail}"), status_code=302)
 
 
 @router.post("/shares/{share_id}/edit", response_class=RedirectResponse)
@@ -544,14 +550,14 @@ def share_edit(
             actor_user_id=current_user.id,
         )
         return RedirectResponse(
-            f"/admin-ui/shares/{share_id}?success=Share updated successfully", status_code=302
+            admin_ui_path(f"/shares/{share_id}?success=Share updated successfully"), status_code=302
         )
     except ValueError:
         return RedirectResponse(
-            f"/admin-ui/shares/{share_id}?error=Invalid visibility value", status_code=302
+            admin_ui_path(f"/shares/{share_id}?error=Invalid visibility value"), status_code=302
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/shares/{share_id}?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/shares/{share_id}?error={e.detail}"), status_code=302)
 
 
 @router.post("/shares/{share_id}/members", response_class=RedirectResponse)
@@ -571,10 +577,10 @@ def share_add_member(
         payload = share_schema.ShareMemberCreate(user_id=user_id, role=role)
         share_service.add_member(db, share, payload, actor_user_id=current_user.id)
         return RedirectResponse(
-            f"/admin-ui/shares/{share_id}?success=Member added successfully", status_code=302
+            admin_ui_path(f"/shares/{share_id}?success=Member added successfully"), status_code=302
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/shares/{share_id}?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/shares/{share_id}?error={e.detail}"), status_code=302)
 
 
 @router.post("/shares/{share_id}/members/{member_user_id}/role", response_class=RedirectResponse)
@@ -595,10 +601,10 @@ def share_update_member_role(
             db, share, member_user_id, payload, actor_user_id=current_user.id
         )
         return RedirectResponse(
-            f"/admin-ui/shares/{share_id}?success=Member role updated", status_code=302
+            admin_ui_path(f"/shares/{share_id}?success=Member role updated"), status_code=302
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/shares/{share_id}?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/shares/{share_id}?error={e.detail}"), status_code=302)
 
 
 @router.post("/shares/{share_id}/members/{member_user_id}/remove", response_class=RedirectResponse)
@@ -613,10 +619,10 @@ def share_remove_member(
         share = share_service.get_share(db, share_id)
         share_service.remove_member(db, share, member_user_id, actor_user_id=current_user.id)
         return RedirectResponse(
-            f"/admin-ui/shares/{share_id}?success=Member removed successfully", status_code=302
+            admin_ui_path(f"/shares/{share_id}?success=Member removed successfully"), status_code=302
         )
     except HTTPException as e:
-        return RedirectResponse(f"/admin-ui/shares/{share_id}?error={e.detail}", status_code=302)
+        return RedirectResponse(admin_ui_path(f"/shares/{share_id}?error={e.detail}"), status_code=302)
 
 
 # ==================== SETTINGS ====================

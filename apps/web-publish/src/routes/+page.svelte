@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import type { PageData } from './$types';
 
@@ -9,6 +10,19 @@
 	const currentUser = $derived($page.data?.currentUser);
 	const adminUrl = $derived($page.data?.adminUrl);
 	const shares = $derived(data?.shares || []);
+	const showHeaderSignIn = $derived(!currentUser && shares.length > 0);
+	let logoutPending = $state(false);
+
+	async function handleLogout() {
+		if (!browser) return;
+		logoutPending = true;
+		try {
+			await fetch('/api/auth', { method: 'DELETE' });
+			window.location.reload();
+		} finally {
+			logoutPending = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -43,7 +57,10 @@
 					{#if adminUrl}
 						<a href={adminUrl} target="_blank" rel="noopener" class="btn btn-secondary">Admin Panel</a>
 					{/if}
-				{:else}
+					<button type="button" class="btn btn-ghost" disabled={logoutPending} onclick={() => void handleLogout()}>
+						{logoutPending ? 'Signing out...' : 'Sign out'}
+					</button>
+				{:else if showHeaderSignIn}
 					<a href="/login" class="btn btn-primary">Sign in</a>
 				{/if}
 			</div>
@@ -98,13 +115,23 @@
 			</section>
 		{:else}
 			<div class="empty-state">
-				<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+				<div class="empty-state-icon">
+					<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
 					<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
-				</svg>
+					</svg>
+				</div>
 				<h2>No published spaces yet</h2>
-				<p>Published documentation will appear here once an admin enables web publishing.</p>
+				<p>
+					{#if currentUser}
+						No published spaces available to your account yet.
+					{:else}
+						Sign in to view private spaces available to your account, or wait until an admin publishes public documentation.
+					{/if}
+				</p>
 				{#if !currentUser}
-					<a href="/login" class="btn btn-primary" style="margin-top: 1rem;">Sign in to manage</a>
+					<div class="empty-state-actions">
+						<a href="/login" class="btn btn-primary">Sign in</a>
+					</div>
 				{/if}
 			</div>
 		{/if}
@@ -254,6 +281,19 @@
 		text-decoration: none;
 	}
 
+	.btn-ghost {
+		background: transparent;
+		color: hsl(var(--muted-foreground));
+		border-color: hsl(var(--border) / 0.45);
+	}
+
+	.btn-ghost:hover {
+		color: hsl(var(--foreground));
+		border-color: hsl(var(--primary) / 0.25);
+		background: hsl(var(--primary) / 0.05);
+		text-decoration: none;
+	}
+
 	/* ---- Main ---- */
 	.home-main {
 		flex: 1;
@@ -395,8 +435,26 @@
 	/* ---- Empty State ---- */
 	.empty-state {
 		text-align: center;
-		padding: 4rem 1rem;
+		padding: 4rem 1.25rem;
 		color: hsl(var(--muted-foreground));
+		max-width: 520px;
+		margin: 0 auto;
+		border: 1px solid hsl(var(--border) / 0.3);
+		border-radius: 1rem;
+		background: hsl(var(--card) / 0.55);
+		backdrop-filter: blur(10px);
+	}
+
+	.empty-state-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 4rem;
+		height: 4rem;
+		border-radius: 999px;
+		margin-bottom: 0.25rem;
+		background: hsl(var(--muted) / 0.35);
+		border: 1px solid hsl(var(--border) / 0.3);
 	}
 
 	.empty-state h2 {
@@ -409,6 +467,13 @@
 		max-width: 360px;
 		margin: 0 auto;
 		font-size: 0.9rem;
+		line-height: 1.6;
+	}
+
+	.empty-state-actions {
+		display: flex;
+		justify-content: center;
+		margin-top: 1.25rem;
 	}
 
 	@media (max-width: 640px) {
