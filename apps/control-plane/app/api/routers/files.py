@@ -6,7 +6,7 @@ import io
 import os
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from minio import Minio
 from minio.error import S3Error
@@ -14,9 +14,8 @@ from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.api import deps
+from app.core import security
 from app.core.config import get_settings
-from app.db import models
 
 CAS_PREFIX = "cas/"
 SIGNED_URL_TTL = 3600
@@ -92,6 +91,25 @@ def _verify_sig(file_hash: str, action: str, sig: str, exp: int) -> None:
         raise HTTPException(403, "Invalid signature")
 
 
+def _require_file_api_auth(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing credentials")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+    try:
+        payload = security.decode_access_token(token)
+    except Exception as exc:  # pragma: no cover - auth library defines concrete subclasses
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
+
+    if not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    return token
+
+
 # ── POST /file-token ───────────────────────────────────────────────
 @file_token_router.post("/file-token")
 # Attachment recovery can legitimately request hundreds of file tokens in a burst.
@@ -100,13 +118,10 @@ def _verify_sig(file_hash: str, action: str, sig: str, exp: int) -> None:
 def create_file_token(
     request: Request,
     payload: FileTokenRequest,
-    current_user: models.User = Depends(deps.get_current_user),
+    token: str = Depends(_require_file_api_auth),
 ):
     settings = get_settings()
     expiry = int(time.time()) + settings.relay_token_ttl_minutes * 60
-
-    auth_header = request.headers.get("authorization", "")
-    token = auth_header.removeprefix("Bearer ").strip()
 
     origin = _public_origin(request)
     return {
@@ -127,7 +142,7 @@ def create_file_token(
 @files_router.head("/cas/{file_hash}")
 def head_file(
     file_hash: str,
-    current_user: models.User = Depends(deps.get_current_user),
+    _: str = Depends(_require_file_api_auth),
 ):
     bucket = _bucket_name()
     try:
@@ -144,7 +159,7 @@ def head_file(
 def get_download_url(
     request: Request,
     file_hash: str,
-    current_user: models.User = Depends(deps.get_current_user),
+    _: str = Depends(_require_file_api_auth),
 ):
     exp = int(time.time()) + SIGNED_URL_TTL
     sig = _sign(file_hash, "download", exp)
@@ -157,7 +172,7 @@ def get_download_url(
 def get_upload_url(
     request: Request,
     file_hash: str,
-    current_user: models.User = Depends(deps.get_current_user),
+    _: str = Depends(_require_file_api_auth),
 ):
     exp = int(time.time()) + SIGNED_URL_TTL
     sig = _sign(file_hash, "upload", exp)

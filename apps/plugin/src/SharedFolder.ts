@@ -983,8 +983,20 @@ export class SharedFolder extends HasProvider {
 			const isSyncableFile = this.isSyncableTFile(file);
 			const fileInFolder = this.checkPath(file.path);
 			const vpath = this.getVirtualPath(file.path);
+			const isImageAsset = this.syncStore.isAlwaysSyncedAsset(vpath);
 			const fileInMap = allRemotePaths.has(vpath);
 			const filePending = this.pendingUpload.has(vpath);
+			if (isImageAsset) {
+				// Safety: attachment recovery may temporarily have incomplete remote metadata.
+				// Never auto-trash local image/CAS files during tree reconciliation.
+				if (fileInFolder && isSyncableFile && !fileInMap && !filePending) {
+					this.log(
+						"cleanupExtraLocalFiles: preserving local image without remote metadata",
+						vpath,
+					);
+				}
+				return;
+			}
 			if (fileInFolder && isSyncableFile && !fileInMap && !filePending) {
 				diffLog.push(`deleted local file ${vpath} for remotely deleted doc`);
 				const promise = this.vault.adapter.trashLocal(file.path);
