@@ -390,14 +390,16 @@ export class SyncFile
 
 	public async push(force = false) {
 		this.log("push");
+		const isCasImageSync = isImageSyncAsset(this.path);
 		if (isDebugAttachmentPath(this.path)) {
 			console.log("[Relay:attachment] push:start", {
 				path: this.path,
 				force,
 				connected: this.sharedFolder.connected,
+				casOnly: isCasImageSync,
 			});
 		}
-		if (!this.sharedFolder.connected) {
+		if (!this.sharedFolder.connected && !isCasImageSync) {
 			this.log("skipping push -- folder is disconnected");
 			if (isDebugAttachmentPath(this.path)) {
 				console.warn("[Relay:attachment] push:skip-disconnected", {

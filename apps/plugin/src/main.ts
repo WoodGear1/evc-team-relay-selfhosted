@@ -1935,6 +1935,9 @@ export default class Live extends Plugin {
 		const imageFiles = this.collectSharedFolderImageFiles(sharedFolder);
 		const syncFiles = new Map<string, SyncFile>();
 		let registered = 0;
+		const hashStore = (
+			sharedFolder as unknown as { hashStore: ContentAddressedFileStore }
+		).hashStore;
 
 		for (const tfile of imageFiles) {
 			const vpath = sharedFolder.getVirtualPath(tfile.path);
@@ -1947,11 +1950,21 @@ export default class Live extends Plugin {
 				registered += 1;
 			}
 
-			const created = sharedFolder.uploadFile(tfile, false);
-			const resolved = created ?? sharedFolder.getFile(tfile, false);
-			if (resolved && isSyncFile(resolved)) {
-				syncFiles.set(resolved.path, resolved);
+			const guid = sharedFolder.syncStore.get(vpath);
+			if (!guid) {
+				continue;
 			}
+
+			const existing = sharedFolder.files.get(guid);
+			if (existing && isSyncFile(existing)) {
+				syncFiles.set(existing.path, existing);
+				continue;
+			}
+
+			const syncFile = new SyncFile(vpath, guid, hashStore, sharedFolder);
+			sharedFolder.files.set(guid, syncFile);
+			sharedFolder.fset.add(syncFile, false);
+			syncFiles.set(syncFile.path, syncFile);
 		}
 
 		console.log("[Relay:attachment] register:referenced-images", {
