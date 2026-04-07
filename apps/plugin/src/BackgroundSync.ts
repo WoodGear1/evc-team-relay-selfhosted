@@ -1,6 +1,12 @@
 import { requestUrl, type RequestUrlResponse } from "obsidian";
 import type { LoginManager } from "./LoginManager";
 import * as Y from "yjs";
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"]);
+function isImageAsset(vpath: string): boolean {
+	const ext = (vpath.toLowerCase().split(".").pop() || "");
+	return IMAGE_EXTS.has(ext);
+}
 import { S3RN, S3RemoteCanvas, S3RemoteDocument } from "./S3RN";
 import { isDocument, type Document } from "./Document";
 import { isCanvas } from "./Canvas";
@@ -140,7 +146,7 @@ export class BackgroundSync extends HasLogging {
 		if (this.hasQueuedOrActiveSync(item.guid)) {
 			return false;
 		}
-		if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+		if (item instanceof SyncFile && isImageAsset(item.path)) {
 			console.warn("[Relay:attachment] queue:clear-stale-sync-marker", {
 				path: item.path,
 				guid: item.guid,
@@ -158,7 +164,7 @@ export class BackgroundSync extends HasLogging {
 		if (this.hasQueuedOrActiveDownload(item.guid)) {
 			return false;
 		}
-		if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+		if (item instanceof SyncFile && isImageAsset(item.path)) {
 			console.warn("[Relay:attachment] queue:clear-stale-download-marker", {
 				path: item.path,
 				guid: item.guid,
@@ -274,7 +280,7 @@ export class BackgroundSync extends HasLogging {
 				syncPromise
 					.then(() => {
 						item.status = "completed";
-						if (doc instanceof SyncFile && doc.path.toLowerCase().startsWith("img/")) {
+						if (doc instanceof SyncFile && isImageAsset(doc.path)) {
 							console.log("[Relay:attachment] queue:sync-complete", {
 								path: doc.path,
 								guid: doc.guid,
@@ -312,7 +318,7 @@ export class BackgroundSync extends HasLogging {
 					})
 					.catch((error: unknown) => {
 						item.status = "failed";
-						if (doc instanceof SyncFile && doc.path.toLowerCase().startsWith("img/")) {
+						if (doc instanceof SyncFile && isImageAsset(doc.path)) {
 							console.error("[Relay:attachment] queue:sync-failed", {
 								path: doc.path,
 								guid: doc.guid,
@@ -411,7 +417,7 @@ export class BackgroundSync extends HasLogging {
 				downloadPromise
 					.then(() => {
 						item.status = "completed";
-						if (item.doc instanceof SyncFile && item.doc.path.toLowerCase().startsWith("img/")) {
+						if (item.doc instanceof SyncFile && isImageAsset(item.doc.path)) {
 							console.log("[Relay:attachment] queue:download-complete", {
 								path: item.doc.path,
 								guid: item.doc.guid,
@@ -437,7 +443,7 @@ export class BackgroundSync extends HasLogging {
 					})
 					.catch((error: unknown) => {
 						item.status = "failed";
-						if (item.doc instanceof SyncFile && item.doc.path.toLowerCase().startsWith("img/")) {
+						if (item.doc instanceof SyncFile && isImageAsset(item.doc.path)) {
 							console.error("[Relay:attachment] queue:download-failed", {
 								path: item.doc.path,
 								guid: item.doc.guid,
@@ -509,7 +515,7 @@ export class BackgroundSync extends HasLogging {
 		this.clearStaleSyncMarkerIfNeeded(item);
 		// Skip if already in progress
 		if (this.inProgressSyncs.has(item.guid)) {
-			if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+			if (item instanceof SyncFile && isImageAsset(item.path)) {
 				console.warn("[Relay:attachment] queue:skip-sync-in-progress", {
 					path: item.path,
 					guid: item.guid,
@@ -590,7 +596,7 @@ export class BackgroundSync extends HasLogging {
 		this.clearStaleDownloadMarkerIfNeeded(item);
 		// Skip if already in progress
 		if (this.inProgressDownloads.has(item.guid)) {
-			if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+			if (item instanceof SyncFile && isImageAsset(item.path)) {
 				console.warn("[Relay:attachment] queue:skip-download-in-progress", {
 					path: item.path,
 					guid: item.guid,
@@ -680,7 +686,7 @@ export class BackgroundSync extends HasLogging {
 		const allItems = [...docs, ...canvases, ...syncFiles];
 		const attachmentPaths = syncFiles
 			.map((file) => file.path)
-			.filter((path) => path.toLowerCase().startsWith("img/"));
+			.filter((path) => isImageAsset(path));
 		console.log("[Relay:attachment] queue:folder-sync", {
 			sharedFolder: sharedFolder.path,
 			docs: docs.length,
@@ -740,7 +746,7 @@ export class BackgroundSync extends HasLogging {
 		this.clearStaleSyncMarkerIfNeeded(item);
 		// Skip if already in progress
 		if (this.inProgressSyncs.has(item.guid)) {
-			if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+			if (item instanceof SyncFile && isImageAsset(item.path)) {
 				console.warn("[Relay:attachment] queue:skip-group-sync-in-progress", {
 					path: item.path,
 					guid: item.guid,
@@ -784,7 +790,7 @@ export class BackgroundSync extends HasLogging {
 		});
 
 		this.syncQueue.push(queueItem);
-		if (item instanceof SyncFile && item.path.toLowerCase().startsWith("img/")) {
+		if (item instanceof SyncFile && isImageAsset(item.path)) {
 			console.log("[Relay:attachment] queue:enqueue-sync", {
 				path: item.path,
 				guid: item.guid,

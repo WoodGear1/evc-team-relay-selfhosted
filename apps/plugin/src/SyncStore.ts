@@ -60,20 +60,18 @@ export class SyncStore extends Observable<SyncStore> {
 		);
 	}
 
+	private static readonly IMAGE_EXTS = new Set([
+		"png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif",
+	]);
+
 	isAlwaysSyncedAsset(vpath: string): boolean {
-		const normalized = vpath.toLowerCase();
-		if (!normalized.startsWith("img/")) {
-			return false;
-		}
-		const ext = normalized.split(".").pop() || "";
-		return ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(
-			ext,
-		);
+		const ext = (vpath.toLowerCase().split(".").pop() || "");
+		return SyncStore.IMAGE_EXTS.has(ext);
 	}
 
 	canSync(vpath: string): boolean {
-		// Managed note attachments live in <share>/img/... and should always sync,
-		// even if user file-type toggles were changed on one of the clients.
+		// Any image file inside the shared folder is always synced as a CAS binary,
+		// regardless of subfolder location or per-extension toggle settings.
 		if (this.isAlwaysSyncedAsset(vpath)) {
 			return true;
 		}

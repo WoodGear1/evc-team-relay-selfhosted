@@ -1114,19 +1114,19 @@ export default class Live extends Plugin {
 											const attachmentPendingPaths: string[] = [];
 											const localSyncFiles =
 												(folder.files ? [...folder.files.values()] : []).filter(isSyncFile);
-											for (const file of localSyncFiles) {
-												if (file.path.toLowerCase().startsWith("img/")) {
-													attachmentLocalPaths.push(file.path);
-												}
+										for (const file of localSyncFiles) {
+											if (folder.syncStore.isAlwaysSyncedAsset(file.path)) {
+												attachmentLocalPaths.push(file.path);
 											}
-											folder.syncStore.forEach((meta, path) => {
-												if (!path.toLowerCase().startsWith("img/")) return;
-												attachmentMetaPaths.push(path);
-											});
-											for (const path of folder.syncStore.pendingUpload.keys()) {
-												if (!path.toLowerCase().startsWith("img/")) continue;
-												attachmentPendingPaths.push(path);
-											}
+										}
+										folder.syncStore.forEach((meta, path) => {
+											if (!folder.syncStore.isAlwaysSyncedAsset(path)) return;
+											attachmentMetaPaths.push(path);
+										});
+										for (const path of folder.syncStore.pendingUpload.keys()) {
+											if (!folder.syncStore.isAlwaysSyncedAsset(path)) continue;
+											attachmentPendingPaths.push(path);
+										}
 											console.log("[Relay:attachment] sync:folder-click-summary", {
 												sharedFolder: folder.path,
 												localImages: attachmentLocalPaths.length,

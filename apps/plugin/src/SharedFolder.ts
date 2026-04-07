@@ -524,7 +524,7 @@ export class SharedFolder extends HasProvider {
 		for (const tfile of this.getSyncFiles()) {
 			if (!(tfile instanceof TFile)) continue;
 			const vpath = this.getVirtualPath(tfile.path);
-			if (vpath.toLowerCase().startsWith("img/")) {
+			if (this.syncStore.isAlwaysSyncedAsset(vpath)) {
 				localImgPaths.push(vpath);
 			}
 		}
@@ -532,11 +532,11 @@ export class SharedFolder extends HasProvider {
 		const metaImgPaths: string[] = [];
 		const pendingImgPaths: string[] = [];
 		this.syncStore.forEach((meta, path) => {
-			if (!path.toLowerCase().startsWith("img/")) return;
+			if (!this.syncStore.isAlwaysSyncedAsset(path)) return;
 			metaImgPaths.push(path);
 		});
 		for (const path of this.pendingUpload.keys()) {
-			if (!path.toLowerCase().startsWith("img/")) continue;
+			if (!this.syncStore.isAlwaysSyncedAsset(path)) continue;
 			pendingImgPaths.push(path);
 		}
 
