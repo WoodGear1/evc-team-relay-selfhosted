@@ -377,29 +377,47 @@ export class SyncFile
 		this.setLoggers(`[SharedFile](${this.path})`);
 	}
 
+	private getActiveSharedFolder(): SharedFolder | null {
+		const parent = this._parent;
+		if (!parent || parent.destroyed || !parent.syncStore) {
+			return null;
+		}
+		return parent;
+	}
+
 	public get lastModified() {
 		return this.stat.mtime;
 		//return Math.max(this.stat.mtime, this.stat.ctime);
 	}
 
 	_refreshMeta() {
-		const meta = this.sharedFolder.syncStore.getMeta(this.path);
+		const sharedFolder = this.getActiveSharedFolder();
+		if (!sharedFolder) {
+			this.meta = undefined;
+			return null;
+		}
+		const meta = sharedFolder.syncStore.getMeta(this.path);
 		this.meta = meta as FileMetas;
 		return meta;
 	}
 
 	public async push(force = false) {
 		this.log("push");
+		const sharedFolder = this.getActiveSharedFolder();
+		if (!sharedFolder) {
+			this.warn("skipping push -- shared folder is unavailable", this.path);
+			return;
+		}
 		const isCasImageSync = isImageSyncAsset(this.path);
 		if (isDebugAttachmentPath(this.path)) {
 			console.log("[Relay:attachment] push:start", {
 				path: this.path,
 				force,
-				connected: this.sharedFolder.connected,
+				connected: sharedFolder.connected,
 				casOnly: isCasImageSync,
 			});
 		}
-		if (!this.sharedFolder.connected && !isCasImageSync) {
+		if (!sharedFolder.connected && !isCasImageSync) {
 			this.log("skipping push -- folder is disconnected");
 			if (isDebugAttachmentPath(this.path)) {
 				console.warn("[Relay:attachment] push:skip-disconnected", {
@@ -408,7 +426,7 @@ export class SyncFile
 			}
 			return;
 		}
-		if (!this.sharedFolder.syncStore.canSync(this.path)) {
+		if (!sharedFolder.syncStore.canSync(this.path)) {
 			this.log("skipping push -- filetype is disabled");
 			if (isDebugAttachmentPath(this.path)) {
 				console.warn("[Relay:attachment] push:skip-disabled", {
@@ -440,8 +458,8 @@ export class SyncFile
 			missingFromStorage
 		) {
 			try {
-				await this.sharedFolder.cas.writeFile(this);
-				await this.sharedFolder.markUploaded(this);
+				await sharedFolder.cas.writeFile(this);
+				await sharedFolder.markUploaded(this);
 				this.uploadError = undefined;
 				this.notifyListeners();
 				if (isDebugAttachmentPath(this.path)) {
@@ -478,6 +496,11 @@ export class SyncFile
 
 	public async sync() {
 		this.log("sync");
+		const sharedFolder = this.getActiveSharedFolder();
+		if (!sharedFolder) {
+			this.warn("skipping sync -- shared folder is unavailable", this.path);
+			return;
+		}
 		this._refreshMeta();
 		if (isDebugAttachmentPath(this.path)) {
 			console.log("[Relay:attachment] sync:start", {
@@ -577,6 +600,10 @@ export class SyncFile
 
 	public async verifyUpload() {
 		this.log("verify upload");
+		if (!this.getActiveSharedFolder()) {
+			this.warn("verifyUpload skipped -- shared folder is unavailable", this.path);
+			return false;
+		}
 		this._refreshMeta();
 		if (!this.meta) {
 			this.warn("verifyUpload called without meta", this.path);
@@ -602,6 +629,11 @@ export class SyncFile
 
 	public async pull() {
 		this.log("pull");
+		const sharedFolder = this.getActiveSharedFolder();
+		if (!sharedFolder) {
+			this.warn("skipping pull -- shared folder is unavailable", this.path);
+			return;
+		}
 		this._refreshMeta();
 		if (!this.meta) {
 			throw new Error("cannot pull without meta");
@@ -627,13 +659,13 @@ export class SyncFile
 			}
 		}
 		try {
-			const content = await this.sharedFolder.cas.readFile(this);
+			const content = await sharedFolder.cas.readFile(this);
 			const parentDir = dirname(this.path);
 			if (parentDir && parentDir !== ".") {
-				await this.sharedFolder.mkdir(parentDir);
+				await sharedFolder.mkdir(parentDir);
 			}
 			await this.vault.adapter.writeBinary(
-				this.sharedFolder.getPath(this.path),
+				sharedFolder.getPath(this.path),
 				content,
 			);
 			await this.caf.hash();
@@ -641,7 +673,7 @@ export class SyncFile
 				console.log("[Relay:attachment] pull:success", {
 					path: this.path,
 					bytes: content.byteLength,
-					targetPath: this.sharedFolder.getPath(this.path),
+					targetPath: sharedFolder.getPath(this.path),
 				});
 			}
 		} catch (e: unknown) {
@@ -679,24 +711,29 @@ export class SyncFile
 	}
 
 	async connect(): Promise<boolean> {
-		if (this.sharedFolder.s3rn instanceof S3Folder) {
+		const sharedFolder = this.getActiveSharedFolder();
+		if (!sharedFolder) {
+			this.warn("connect skipped -- shared folder is unavailable", this.path);
+			return false;
+		}
+		if (sharedFolder.s3rn instanceof S3Folder) {
 			// Local only
 			return false;
 		} else if (this.s3rn instanceof S3Document) {
 			// convert to remote document
-			if (this.sharedFolder.relayId) {
+			if (sharedFolder.relayId) {
 				this.s3rn = new S3RemoteFile(
-					this.sharedFolder.relayId,
-					this.sharedFolder.guid,
+					sharedFolder.relayId,
+					sharedFolder.guid,
 					this.guid,
 				);
 			} else {
-				this.s3rn = new S3File(this.sharedFolder.guid, this.guid);
+				this.s3rn = new S3File(sharedFolder.guid, this.guid);
 			}
 		}
 		return (
-			this.sharedFolder.shouldConnect &&
-			this.sharedFolder.connect().then((connected) => {
+			sharedFolder.shouldConnect &&
+			sharedFolder.connect().then((connected) => {
 				this.connected = true;
 				return this.connected;
 			})

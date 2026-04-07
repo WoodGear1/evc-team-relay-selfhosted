@@ -3013,6 +3013,17 @@ export default class Live extends Plugin {
 					).call(plugin.fileManager, filename, sourcePath);
 				};
 			},
+			getNewFileParent(old: unknown) {
+				return function (sourcePath: string, newFilePath?: string) {
+					const folder = plugin.resolveSelectedContextFolder();
+					if (folder) {
+						return folder;
+					}
+					return (
+						old as (sourcePath: string, newFilePath?: string) => TFolder
+					).call(plugin.fileManager, sourcePath, newFilePath);
+				};
+			},
 		});
 
 		const appAny = this.app as unknown as ObsidianApp;

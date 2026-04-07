@@ -531,10 +531,12 @@ export class BackgroundSync extends HasLogging {
 			// Return existing promise if already processing
 			const existingCallback = this.syncCompletionCallbacks.get(item.guid);
 			if (existingCallback) {
-				return new Promise<void>((resolve, reject) => {
+				const pendingPromise = new Promise<void>((resolve, reject) => {
 					existingCallback.resolve = resolve;
 					existingCallback.reject = reject;
 				});
+				void pendingPromise.catch(() => {});
+				return pendingPromise;
 			}
 			void this.processSyncQueue();
 			return Promise.resolve();
@@ -575,6 +577,7 @@ export class BackgroundSync extends HasLogging {
 				reject,
 			});
 		});
+		void syncPromise.catch(() => {});
 
 		this.syncQueue.push(queueItem);
 		this.syncQueue.sort(compareFilePaths);
@@ -613,10 +616,12 @@ export class BackgroundSync extends HasLogging {
 			const existingCallback = this.downloadCompletionCallbacks.get(item.guid);
 			if (existingCallback) {
 				void this.processDownloadQueue();
-				return new Promise<void>((resolve, reject) => {
+				const pendingPromise = new Promise<void>((resolve, reject) => {
 					existingCallback.resolve = resolve;
 					existingCallback.reject = reject;
 				});
+				void pendingPromise.catch(() => {});
+				return pendingPromise;
 			}
 			void this.processDownloadQueue();
 			return Promise.resolve();
@@ -660,6 +665,7 @@ export class BackgroundSync extends HasLogging {
 		const downloadPromise = new Promise<void>((resolve, reject) => {
 			this.downloadCompletionCallbacks.set(item.guid, { resolve, reject });
 		});
+		void downloadPromise.catch(() => {});
 
 		// Add to the queue and start processing
 		this.downloadQueue.push(queueItem);
@@ -763,10 +769,12 @@ export class BackgroundSync extends HasLogging {
 			const existingCallback = this.syncCompletionCallbacks.get(item.guid);
 			if (existingCallback) {
 				void this.processSyncQueue();
-				return new Promise<void>((resolve, reject) => {
+				const pendingPromise = new Promise<void>((resolve, reject) => {
 					existingCallback.resolve = resolve;
 					existingCallback.reject = reject;
 				});
+				void pendingPromise.catch(() => {});
+				return pendingPromise;
 			}
 			return Promise.resolve();
 		}
@@ -788,6 +796,7 @@ export class BackgroundSync extends HasLogging {
 				reject,
 			});
 		});
+		void syncPromise.catch(() => {});
 
 		this.syncQueue.push(queueItem);
 		if (item instanceof SyncFile && isImageAsset(item.path)) {
