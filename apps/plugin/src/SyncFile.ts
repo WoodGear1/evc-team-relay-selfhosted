@@ -14,11 +14,26 @@ import { Observable, type Unsubscriber } from "./observable/Observable";
 import { generateHash } from "./hashing";
 import type { HasMimeType, IFile } from "./IFile";
 import { getMimeType } from "./mimetypes";
-import { flags } from "./flagManager";
 import { dirname } from "path-browserify";
 
+const IMAGE_EXTS = new Set([
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"webp",
+	"svg",
+	"bmp",
+	"avif",
+]);
+
+function isImageSyncAsset(path: string): boolean {
+	const ext = path.toLowerCase().split(".").pop() || "";
+	return IMAGE_EXTS.has(ext);
+}
+
 function isDebugAttachmentPath(path: string): boolean {
-	return path.toLowerCase().startsWith("img/");
+	return isImageSyncAsset(path);
 }
 
 export function isSyncFile(file: IFile | undefined): file is SyncFile {
@@ -411,7 +426,17 @@ export class SyncFile
 				metaSynctime: this.meta?.synctime ?? null,
 			});
 		}
-		if (!this.meta || (hash && this.meta.hash !== hash) || force) {
+		const missingFromStorage =
+			!!this.meta &&
+			isImageSyncAsset(this.path) &&
+			hash === this.meta.hash &&
+			!(await this.silentVerifyUpload());
+		if (
+			!this.meta ||
+			(hash && this.meta.hash !== hash) ||
+			force ||
+			missingFromStorage
+		) {
 			try {
 				await this.sharedFolder.cas.writeFile(this);
 				await this.sharedFolder.markUploaded(this);
@@ -485,15 +510,12 @@ export class SyncFile
 
 		try {
 			const hash = await this.caf.hash();
-			if (flags().enableVerifyUploads) {
+			if (isImageSyncAsset(this.path)) {
 				// Not remote
-				try {
-					if (!await this.verifyUpload()) {
-						this.warn("file in metadata, but not on the server!");
-						await this.push();
-					}
-				} catch {
-					// pass
+				if (!await this.silentVerifyUpload()) {
+					this.warn("file in metadata, but not on the server!");
+					await this.push();
+					return;
 				}
 			}
 			if (hash !== this.meta.hash) {
@@ -559,6 +581,21 @@ export class SyncFile
 			return false;
 		}
 		return this.sharedFolder.cas.verify(this);
+	}
+
+	private async silentVerifyUpload(): Promise<boolean> {
+		try {
+			return await this.verifyUpload();
+		} catch (error: unknown) {
+			this.warn("verify upload failed", error);
+			if (isDebugAttachmentPath(this.path)) {
+				console.warn("[Relay:attachment] verify:error", {
+					path: this.path,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+			return false;
+		}
 	}
 
 	public async pull() {

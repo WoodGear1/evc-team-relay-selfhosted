@@ -93,7 +93,7 @@ import { BugReportModal } from "./ui/BugReportModal";
 import { IndexedDBAnalysisModal } from "./ui/IndexedDBAnalysisModal";
 
 import { SyncSettingsManager } from "./SyncSettings";
-import { ContentAddressedFileStore, isSyncFile } from "./SyncFile";
+import { ContentAddressedFileStore, SyncFile, isSyncFile } from "./SyncFile";
 import { isDocument } from "./Document";
 import { EndpointManager, type EndpointSettings } from "./EndpointManager";
 import { SelfHostModal } from "./ui/SelfHostModal";
@@ -1104,6 +1104,8 @@ export default class Live extends Plugin {
 										try {
 											const migratedEmbeds =
 												await this.migrateManagedAttachmentsForSharedFolder(folder);
+											const attachmentStats =
+												await this.syncReferencedImages(folder);
 											if (migratedEmbeds > 0) {
 												syncNotice.setMessage(
 													`Syncing... migrated ${migratedEmbeds} attachment links`,
@@ -1114,21 +1116,23 @@ export default class Live extends Plugin {
 											const attachmentPendingPaths: string[] = [];
 											const localSyncFiles =
 												(folder.files ? [...folder.files.values()] : []).filter(isSyncFile);
-										for (const file of localSyncFiles) {
-											if (folder.syncStore.isAlwaysSyncedAsset(file.path)) {
-												attachmentLocalPaths.push(file.path);
+											for (const file of localSyncFiles) {
+												if (folder.syncStore.isAlwaysSyncedAsset(file.path)) {
+													attachmentLocalPaths.push(file.path);
+												}
 											}
-										}
-										folder.syncStore.forEach((meta, path) => {
-											if (!folder.syncStore.isAlwaysSyncedAsset(path)) return;
-											attachmentMetaPaths.push(path);
-										});
-										for (const path of folder.syncStore.pendingUpload.keys()) {
-											if (!folder.syncStore.isAlwaysSyncedAsset(path)) continue;
-											attachmentPendingPaths.push(path);
-										}
+											folder.syncStore.forEach((meta, path) => {
+												if (!folder.syncStore.isAlwaysSyncedAsset(path)) return;
+												attachmentMetaPaths.push(path);
+											});
+											for (const path of folder.syncStore.pendingUpload.keys()) {
+												if (!folder.syncStore.isAlwaysSyncedAsset(path)) continue;
+												attachmentPendingPaths.push(path);
+											}
 											console.log("[Relay:attachment] sync:folder-click-summary", {
 												sharedFolder: folder.path,
+												discoveredImages: attachmentStats.discovered,
+												registeredImages: attachmentStats.registered,
 												localImages: attachmentLocalPaths.length,
 												metaImages: attachmentMetaPaths.length,
 												pendingImages: attachmentPendingPaths.length,
@@ -1154,6 +1158,9 @@ export default class Live extends Plugin {
 											const lines = [`Sync complete`];
 											lines.push(`Files: ${stats.totalFiles} total`);
 											lines.push(`Uploaded: ${stats.synced} (${mb} MB)`);
+											lines.push(
+												`Images: ${attachmentStats.verified} available, ${attachmentStats.uploaded} uploaded, ${attachmentStats.failed} failed`,
+											);
 											if (stats.skipped > 0) lines.push(`Skipped: ${stats.skipped}`);
 											if (stats.failed > 0) lines.push(`Failed: ${stats.failed}`);
 											console.log("[Relay:sync] done:", JSON.stringify(stats));
@@ -1888,6 +1895,122 @@ export default class Live extends Plugin {
 		}
 
 		return migratedEmbeds;
+	}
+
+	private collectSharedFolderImageFiles(sharedFolder: SharedFolder): TFile[] {
+		const discovered = new Map<string, TFile>();
+		const folderRoot = this.vault.getAbstractFileByPath(sharedFolder.path);
+		if (folderRoot instanceof TFolder) {
+			Vault.recurseChildren(folderRoot, (file) => {
+				if (!(file instanceof TFile)) return;
+				if (!sharedFolder.checkPath(file.path)) return;
+				if (!this.attachmentManager.isImageFilename(file.name)) return;
+				discovered.set(normalizePath(file.path), file);
+			});
+		}
+
+		for (const note of this.vault.getMarkdownFiles()) {
+			if (!sharedFolder.checkPath(note.path)) continue;
+			const embeds = this.app.metadataCache.getFileCache(note)?.embeds ?? [];
+			for (const embed of embeds) {
+				const linkedFile = this.app.metadataCache.getFirstLinkpathDest(
+					embed.link,
+					note.path,
+				);
+				if (!(linkedFile instanceof TFile)) continue;
+				if (!sharedFolder.checkPath(linkedFile.path)) continue;
+				if (!this.attachmentManager.isImageFilename(linkedFile.name)) continue;
+				discovered.set(normalizePath(linkedFile.path), linkedFile);
+			}
+		}
+
+		return [...discovered.values()];
+	}
+
+	private async registerAllReferencedImages(sharedFolder: SharedFolder): Promise<{
+		discovered: number;
+		registered: number;
+		syncFiles: SyncFile[];
+	}> {
+		const imageFiles = this.collectSharedFolderImageFiles(sharedFolder);
+		const syncFiles = new Map<string, SyncFile>();
+		let registered = 0;
+
+		for (const tfile of imageFiles) {
+			const vpath = sharedFolder.getVirtualPath(tfile.path);
+			if (!sharedFolder.syncStore.canSync(vpath)) {
+				continue;
+			}
+
+			if (!sharedFolder.syncStore.has(vpath)) {
+				sharedFolder.placeHold([tfile]);
+				registered += 1;
+			}
+
+			const created = sharedFolder.uploadFile(tfile, false);
+			const resolved = created ?? sharedFolder.getFile(tfile, false);
+			if (resolved && isSyncFile(resolved)) {
+				syncFiles.set(resolved.path, resolved);
+			}
+		}
+
+		console.log("[Relay:attachment] register:referenced-images", {
+			sharedFolder: sharedFolder.path,
+			discovered: imageFiles.length,
+			registered,
+			syncFiles: syncFiles.size,
+			sample: [...syncFiles.keys()].slice(0, 10),
+		});
+
+		return {
+			discovered: imageFiles.length,
+			registered,
+			syncFiles: [...syncFiles.values()],
+		};
+	}
+
+	private async syncReferencedImages(sharedFolder: SharedFolder): Promise<{
+		discovered: number;
+		registered: number;
+		uploaded: number;
+		verified: number;
+		failed: number;
+	}> {
+		const registration = await this.registerAllReferencedImages(sharedFolder);
+		let uploaded = 0;
+		let verified = 0;
+		let failed = 0;
+
+		for (const syncFile of registration.syncFiles) {
+			const wasPresent = await syncFile.verifyUpload().catch(() => false);
+			try {
+				await syncFile.sync();
+				const isPresent = await syncFile.verifyUpload().catch(() => false);
+				if (isPresent) {
+					verified += 1;
+					if (!wasPresent) {
+						uploaded += 1;
+					}
+				} else {
+					failed += 1;
+				}
+			} catch (error: unknown) {
+				failed += 1;
+				console.error("[Relay:attachment] sync:referenced-image-failed", {
+					sharedFolder: sharedFolder.path,
+					path: syncFile.path,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+
+		return {
+			discovered: registration.discovered,
+			registered: registration.registered,
+			uploaded,
+			verified,
+			failed,
+		};
 	}
 
 	private getSelectedFileExplorerItem(): TAbstractFile | null {
