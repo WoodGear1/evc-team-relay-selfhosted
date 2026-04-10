@@ -1,0 +1,2 @@
+cd \
+/mnt/tank/docker-containers/obsidian-relay/code/apps/web-publish/src/routes/[slug]/history\ && put \F:/Development/ObsidianSinc/brat-repo/apps/web-publish/src/routes/[slug]/history/+page.svelte\ \+page.svelte\

@@ -65,17 +65,36 @@ export interface RelayToken {
 	expires_at: string;
 }
 
+export interface DocumentVersion {
+	id: string;
+	share_id: string;
+	document_path: string;
+	content: string;
+	content_hash: string;
+	created_by_user_id: string | null;
+	created_by_email: string | null;
+	restored_from_version_id: string | null;
+	metadata_json: Record<string, unknown> | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface DocumentVersionDiffResponse {
+	diff_preview: string;
+	base_version_id?: string | null;
+}
+
 /**
  * Fetch share metadata by slug.
  */
 function buildAuthHeaders({ sessionToken, authToken }: WebAuthContext = {}): Record<string, string> {
 	const headers: Record<string, string> = {};
 
-	if (sessionToken) {
+	if (sessionToken && sessionToken !== 'undefined') {
 		headers.Cookie = `web_session=${sessionToken}`;
 	}
 
-	if (authToken) {
+	if (authToken && authToken !== 'undefined') {
 		headers.Authorization = `Bearer ${authToken}`;
 	}
 
@@ -210,6 +229,56 @@ export async function getRelayToken(
 	return response.json();
 }
 
+export async function getDocumentVersions(
+	shareId: string,
+	documentPath: string,
+	auth: WebAuthContext = {}
+): Promise<DocumentVersion[]> {
+	const qs = new URLSearchParams({ document_path: documentPath });
+	const response = await fetch(
+		`${CONTROL_PLANE_URL}/v1/document-versions/shares/${shareId}?${qs.toString()}`,
+		{ headers: buildAuthHeaders(auth) }
+	);
+
+	if (!response.ok) {
+		throw new Error(`Failed to fetch document versions: ${response.statusText}`);
+	}
+
+	return response.json();
+}
+
+export async function getVersionDiff(
+	versionId: string,
+	auth: WebAuthContext = {}
+): Promise<DocumentVersionDiffResponse> {
+	const response = await fetch(`${CONTROL_PLANE_URL}/v1/document-versions/${versionId}/diff`, {
+		headers: buildAuthHeaders(auth)
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to fetch version diff: ${response.statusText}`);
+	}
+
+	return response.json();
+}
+
+export async function restoreVersion(
+	versionId: string,
+	auth: WebAuthContext = {}
+): Promise<{ content: string }> {
+	const response = await fetch(`${CONTROL_PLANE_URL}/v1/document-versions/${versionId}/restore`, {
+		method: 'POST',
+		headers: buildAuthHeaders(auth)
+	});
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ detail: 'Failed to restore version' }));
+		throw new Error(error.detail || 'Failed to restore version');
+	}
+
+	return response.json();
+}
+
 export interface ServerInfo {
 	id: string;
 	name: string;
@@ -224,7 +293,11 @@ export interface ServerInfo {
 		oauth_provider?: string | null;
 		web_publish_enabled?: boolean;
 		web_publish_domain?: string | null;
+		git_repo_url?: string | null;
+		git_sync_enabled?: boolean;
 	};
+	git_repo_url?: string | null;
+	git_sync_enabled?: boolean;
 	branding: {
 		name: string;
 		logo_url: string;
@@ -273,6 +346,16 @@ export interface CurrentUser {
 	created_at: string;
 }
 
+export class HttpStatusError extends Error {
+	status: number;
+
+	constructor(status: number, message: string) {
+		super(message);
+		this.name = 'HttpStatusError';
+		this.status = status;
+	}
+}
+
 /**
  * Get server info including OAuth configuration.
  */
@@ -314,7 +397,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<Password
 
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({ detail: 'Token refresh failed' }));
-		throw new Error(error.detail || 'Token refresh failed');
+		throw new HttpStatusError(response.status, error.detail || 'Token refresh failed');
 	}
 
 	return response.json();
@@ -390,7 +473,7 @@ export async function getCurrentUser(token: string): Promise<CurrentUser> {
 	});
 
 	if (!response.ok) {
-		throw new Error(`Failed to fetch current user: ${response.statusText}`);
+		throw new HttpStatusError(response.status, `Failed to fetch current user: ${response.statusText}`);
 	}
 
 	return response.json();

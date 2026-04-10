@@ -1,10 +1,12 @@
 import { redirect } from '@sveltejs/kit';
 import { getServerInfo, getOAuthAuthorizeUrl } from '$lib/api';
+import { isSecureRequest, sanitizeReturnTo } from '$lib/auth';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ url, cookies }) => {
-	const returnTo = url.searchParams.get('return') || '/';
+export const load: PageServerLoad = async ({ url, cookies, request }) => {
+	const returnTo = sanitizeReturnTo(url.searchParams.get('return'));
 	const errorMessage = url.searchParams.get('error');
+	const secure = isSecureRequest(url, request.headers);
 
 	// Check if already logged in
 	const existingToken = cookies.get('auth_token');
@@ -48,7 +50,7 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 		cookies.set('oauth_state', authResponse.state, {
 			path: '/',
 			httpOnly: true,
-			secure: url.protocol === 'https:',
+			secure,
 			sameSite: 'lax',
 			maxAge: 600 // 10 minutes
 		});
@@ -57,7 +59,7 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 		cookies.set('oauth_return', returnTo, {
 			path: '/',
 			httpOnly: true,
-			secure: url.protocol === 'https:',
+			secure,
 			sameSite: 'lax',
 			maxAge: 600
 		});

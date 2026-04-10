@@ -306,6 +306,141 @@ pre code {
 	border: none;
 }
 
+.code-block-container {
+	margin: 1.25rem 0;
+	border: 1px solid hsl(var(--border) / 0.45);
+	border-radius: 14px;
+	overflow: hidden;
+	background: linear-gradient(180deg, hsl(230 17% 14%) 0%, hsl(230 17% 11%) 100%);
+	box-shadow: 0 10px 30px hsl(240 20% 4% / 0.18);
+}
+
+.code-block-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.7rem 0.9rem;
+	border-bottom: 1px solid hsl(240 15% 100% / 0.06);
+	background: hsl(230 18% 10% / 0.96);
+}
+
+.code-lang,
+.code-line-count {
+	font-family: var(--font-mono);
+	font-size: 0.74rem;
+}
+
+.code-lang {
+	font-weight: 600;
+	color: hsl(210 25% 92%);
+}
+
+.code-line-count {
+	color: hsl(220 12% 64%);
+}
+
+.code-block-container pre {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.code-block-container code {
+	display: block;
+	background: transparent;
+	color: hsl(220 20% 88%);
+}
+
+.code-line {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	align-items: stretch;
+	min-width: 100%;
+}
+
+.line-num {
+	position: sticky;
+	left: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	min-width: 3rem;
+	padding: 0.08rem 0.75rem 0.08rem 0.55rem;
+	background: hsl(230 18% 9%);
+	color: hsl(220 10% 52%);
+	border-right: 1px solid hsl(240 15% 100% / 0.06);
+	font-size: 0.72rem;
+	font-variant-numeric: tabular-nums;
+	user-select: none;
+}
+
+.code-line-content {
+	display: block;
+	padding: 0.08rem 1rem 0.08rem 0.8rem;
+	min-width: 0;
+}
+
+.code-line:hover .line-num {
+	color: hsl(220 18% 72%);
+	background: hsl(230 18% 11%);
+}
+
+.code-line:hover .code-line-content {
+	background: hsl(240 15% 100% / 0.03);
+}
+
+.hljs {
+	background: transparent;
+	color: hsl(220 20% 88%);
+}
+
+.hljs-comment,
+.hljs-quote {
+	color: hsl(220 10% 52%);
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link {
+	color: hsl(263 69% 74%);
+}
+
+.hljs-string,
+.hljs-title,
+.hljs-name,
+.hljs-type,
+.hljs-attribute,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: hsl(150 46% 67%);
+}
+
+.hljs-number,
+.hljs-meta,
+.hljs-meta .hljs-string,
+.hljs-attr,
+.hljs-variable,
+.hljs-template-variable {
+	color: hsl(35 92% 72%);
+}
+
+.hljs-built_in,
+.hljs-doctag,
+.hljs-regexp {
+	color: hsl(200 78% 71%);
+}
+
+.dark .code-block-container {
+	box-shadow: 0 14px 40px hsl(0 0% 0% / 0.35);
+}
+
 /* ================================
    Tables
    ================================ */

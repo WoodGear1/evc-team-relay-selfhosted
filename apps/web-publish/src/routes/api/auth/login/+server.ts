@@ -5,6 +5,7 @@ import {
 	type PasswordLoginWith2FARequest,
 	type PasswordLoginSuccessResponse
 } from '$lib/api';
+import { isSecureRequest, sanitizeReturnTo } from '$lib/auth';
 import type { RequestHandler } from './$types';
 
 interface LoginRequestBody {
@@ -42,7 +43,7 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 	const email = body.email?.trim();
 	const password = body.password;
 	const totpCode = body.totp_code?.trim();
-	const returnTo = body.returnTo || '/';
+	const returnTo = sanitizeReturnTo(body.returnTo);
 
 	if (!email || !password) {
 		throw error(400, 'Email and password are required.');
@@ -85,14 +86,14 @@ export const POST: RequestHandler = async ({ request, cookies, url }) => {
 	cookies.set('auth_token', tokenResponse.access_token, {
 		path: '/',
 		httpOnly: true,
-		secure: url.protocol === 'https:',
+		secure: isSecureRequest(url, request.headers),
 		sameSite: 'lax',
 		maxAge: tokenResponse.expires_in || 86400
 	});
 	cookies.set('refresh_token', tokenResponse.refresh_token, {
 		path: '/',
 		httpOnly: true,
-		secure: url.protocol === 'https:',
+		secure: isSecureRequest(url, request.headers),
 		sameSite: 'lax',
 		maxAge: 60 * 60 * 24 * 30
 	});

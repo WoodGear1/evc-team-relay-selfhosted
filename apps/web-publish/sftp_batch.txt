@@ -1,0 +1,2 @@
+cd "/mnt/tank/docker-containers/obsidian-relay/patches/routers"
+put "F:\Development\ObsidianSinc\brat-repo\apps\web-publish\document_versions_new.py" "document_versions.py"

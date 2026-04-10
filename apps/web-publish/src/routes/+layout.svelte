@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import '../app.css';
 	import Sidebar from '$lib/components/Sidebar.svelte';
-import ViewerTopbar from '$lib/components/ViewerTopbar.svelte';
+	import ViewerTopbar from '$lib/components/ViewerTopbar.svelte';
 	import LoadingBar from '$lib/components/LoadingBar.svelte';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
@@ -20,8 +20,8 @@ import ViewerTopbar from '$lib/components/ViewerTopbar.svelte';
 
 	let { children, data } = $props();
 
-const currentUser = $derived(data?.currentUser || null);
-const isAuthenticated = $derived(Boolean(currentUser));
+	const currentUser = $derived(data?.currentUser || null);
+	const isAuthenticated = $derived(Boolean(currentUser));
 
 	// Check if on home page
 	const isHomePage = $derived($page.url.pathname === '/');
@@ -32,8 +32,16 @@ const isAuthenticated = $derived(Boolean(currentUser));
 	const currentSlug = $derived($page.data?.share?.web_slug);
 	// Current path for highlighting active item in file tree
 	const currentPath = $derived($page.data?.filePath || '');
-const resourceKind = $derived($page.data?.resourceKind || 'share');
-const adminUrl = $derived(data?.adminUrl || null);
+	const documentPath = $derived($page.data?.documentPath || '');
+	const share = $derived($page.data?.share || null);
+	const resourceKind = $derived($page.data?.resourceKind || 'share');
+	const adminUrl = $derived(data?.adminUrl || null);
+	const canEdit = $derived(Boolean($page.data?.canEdit));
+	const showHistory = $derived(Boolean(currentSlug && documentPath));
+	const isHistoryPage = $derived($page.url.pathname.endsWith('/history'));
+	const gitRepoUrl = $derived(
+		data?.serverInfo?.git_repo_url || data?.serverInfo?.features?.git_repo_url || ''
+	);
 
 	// Get branding from server info (from layout load)
 	const branding = $derived(data?.serverInfo?.branding);
@@ -134,15 +142,29 @@ const adminUrl = $derived(data?.adminUrl || null);
 			onCollapseChange={handleSidebarCollapseChange}
 		/>
 	{/if}
-	<main class="main-content" class:collapsed={sidebarCollapsed} class:home-page={isHomePage}>
-		<div class="content-wrapper" class:home-page={isHomePage}>
+	<main
+		class="main-content"
+		class:collapsed={sidebarCollapsed}
+		class:home-page={isHomePage}
+		class:history-page={isHistoryPage}
+	>
+		<div
+			class="content-wrapper"
+			class:home-page={isHomePage}
+			class:history-page={isHistoryPage}
+		>
 			{#if !isHomePage}
 				<ViewerTopbar
 					currentSlug={currentSlug}
 					currentPath={currentPath}
+					documentPath={documentPath}
+					share={share}
 					resourceKind={resourceKind}
 					currentUser={currentUser}
 					enableSearch={Boolean(currentSlug && folderItems?.length)}
+					canEdit={canEdit}
+					showHistory={showHistory}
+					gitRepoUrl={gitRepoUrl}
 				/>
 			{/if}
 			{@render children()}
@@ -208,6 +230,18 @@ const adminUrl = $derived(data?.adminUrl || null);
 		margin: 0 auto;
 	}
 
+	.content-wrapper.history-page {
+		max-width: none;
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.main-content.history-page {
+		padding: 1.25rem 1.1rem 1.75rem;
+	}
+
 	.content-wrapper.home-page {
 		max-width: 1200px;
 		width: 100%;
@@ -228,6 +262,12 @@ const adminUrl = $derived(data?.adminUrl || null);
 	@media (min-width: 769px) and (max-width: 1024px) {
 		.main-content {
 			padding: 1.5rem;
+		}
+	}
+
+	@media (min-width: 1280px) {
+		.main-content.history-page {
+			padding-inline: 1.6rem;
 		}
 	}
 

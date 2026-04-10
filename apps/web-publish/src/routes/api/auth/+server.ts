@@ -7,6 +7,13 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import {
+	buildCookieOptions,
+	deleteCookie,
+	isSecureRequest,
+	parseCookieMaxAge,
+	parseCookieSameSite
+} from '$lib/auth';
 
 const CONTROL_PLANE_URL =
 	typeof process !== 'undefined' && process.env.CONTROL_PLANE_URL
@@ -19,7 +26,7 @@ interface AuthRequest {
 	resourceKind?: 'share' | 'link';
 }
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async ({ request, cookies, url }) => {
 	let body: AuthRequest;
 
 	try {
@@ -77,20 +84,22 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 		if (setCookieHeader) {
 			// Parse the cookie and set it using SvelteKit's cookies API
-			// The Control Plane sets: web_session={token}; HttpOnly; Secure; SameSite=Strict; Max-Age=86400
+			// Mirror the control-plane cookie lifetime/policy as closely as possible.
 			const cookieMatch = setCookieHeader.match(/web_session=([^;]+)/);
 
 			if (cookieMatch) {
 				const sessionToken = cookieMatch[1];
+				const maxAge = parseCookieMaxAge(setCookieHeader) ?? 86400;
+				const sameSite = parseCookieSameSite(setCookieHeader, 'strict');
 
-				// Set the cookie using SvelteKit's API (mirrors Control Plane settings)
-				cookies.set('web_session', sessionToken, {
-					path: '/',
-					maxAge: 86400, // 24 hours
-					httpOnly: true,
-					secure: true,
-					sameSite: 'strict'
-				});
+				cookies.set(
+					'web_session',
+					sessionToken,
+					buildCookieOptions(isSecureRequest(url, request.headers), {
+						maxAge,
+						sameSite
+					})
+				);
 			}
 		}
 
@@ -113,10 +122,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	}
 };
 
-export const DELETE: RequestHandler = async ({ cookies }) => {
-	cookies.delete('auth_token', { path: '/' });
-	cookies.delete('refresh_token', { path: '/' });
-	cookies.delete('web_session', { path: '/' });
+export const DELETE: RequestHandler = async ({ cookies, request, url }) => {
+	const secure = isSecureRequest(url, request.headers);
+	deleteCookie(cookies, 'auth_token', secure);
+	deleteCookie(cookies, 'refresh_token', secure);
+	deleteCookie(cookies, 'web_session', secure);
 
 	return json({ success: true });
 };

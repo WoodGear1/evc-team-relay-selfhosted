@@ -1,5 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import { searchShareContent } from '$lib/api';
+import { getRequestTokens, requireDocumentAccess, resolveWebAccessContext } from '$lib/webAccess';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -13,14 +14,28 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	try {
-		const results = await searchShareContent(
+		const access = await resolveWebAccessContext(slug, getRequestTokens(cookies));
+		requireDocumentAccess(access);
+
+		let results = await searchShareContent(
 			slug,
 			query,
-			cookies.get('web_session'),
-			cookies.get('auth_token'),
-			resourceKind,
+			access.sessionToken,
+			access.authToken,
+			access.resourceKind,
 			Number.isFinite(limit) ? limit : 8
 		);
+
+		if (results.length === 0 && query.startsWith('#') && query.length > 1) {
+			results = await searchShareContent(
+				slug,
+				query.slice(1),
+				access.sessionToken,
+				access.authToken,
+				access.resourceKind,
+				Number.isFinite(limit) ? limit : 8
+			);
+		}
 
 		return json({ results });
 	} catch (err) {

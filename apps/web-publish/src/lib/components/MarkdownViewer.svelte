@@ -152,12 +152,11 @@
 				e.preventDefault();
 				const tag = tagChip.getAttribute('data-tag');
 				if (tag) {
-					const searchInput = document.querySelector<HTMLInputElement>('.search-input-wrap input[type="search"]');
-					if (searchInput) {
-						searchInput.value = `#${tag}`;
-						searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-						searchInput.focus();
-					}
+					window.dispatchEvent(
+						new CustomEvent('relay:search', {
+							detail: { query: `#${tag}` }
+						})
+					);
 				}
 			}
 
@@ -370,16 +369,16 @@
 	}
 
 	.markdown-content :global(code) {
-		background-color: hsl(var(--code-inline-bg));
+		background-color: hsl(var(--muted));
 		padding: 0.2em 0.4em;
 		border-radius: 3px;
 		font-family: var(--font-mono);
 		font-size: 0.9em;
-		color: hsl(var(--code-inline-fg));
+		color: hsl(var(--foreground));
 	}
 
 	.markdown-content :global(pre) {
-		background-color: hsl(var(--code-bg));
+		background-color: hsl(var(--muted) / 0.3);
 		padding: 0.75rem 1rem;
 		border-radius: 8px;
 		overflow-x: auto;
@@ -391,9 +390,9 @@
 	.markdown-content :global(pre code) {
 		background-color: transparent;
 		padding: 0;
-		color: hsl(var(--code-fg));
-		font-size: 0.8rem;
-		line-height: 1.15;
+		color: inherit;
+		font-size: 0.85rem;
+		line-height: 1.35;
 	}
 
 	.markdown-content :global(blockquote) {
@@ -535,14 +534,23 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
-		padding: 0.15em 0.55em 0.15em 0.4em;
+		padding: 0.16em 0.6em 0.16em 0.44em;
+		margin: 0.04em 0.16em 0.1em 0;
 		font-size: 0.875em;
 		font-weight: 500;
 		line-height: 1.5;
-		border-radius: 6px;
+		border-radius: 999px;
 		text-decoration: none;
 		transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
-		vertical-align: baseline;
+		vertical-align: middle;
+		max-width: 100%;
+		white-space: nowrap;
+	}
+
+	.markdown-content :global(.wikilink-chip > span:last-child) {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.markdown-content :global(.wikilink-chip-icon) {
@@ -583,19 +591,30 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
-		padding: 0.15em 0.55em 0.15em 0.4em;
-		margin: 0.15em 0.1em;
+		padding: 0.16em 0.62em 0.16em 0.44em;
+		margin: 0.04em 0.16em 0.1em 0;
 		font-size: 0.875em;
 		font-weight: 500;
 		line-height: 1.5;
-		border-radius: 5px;
+		border-radius: 999px;
 		color: hsl(var(--primary));
-		background: hsl(var(--primary) / 0.07);
-		border: 1px solid hsl(var(--primary) / 0.12);
+		background: linear-gradient(180deg, hsl(var(--primary) / 0.1), hsl(var(--primary) / 0.06));
+		border: 1px solid hsl(var(--primary) / 0.16);
 		text-decoration: none;
 		cursor: pointer;
 		transition: all 0.15s ease;
-		vertical-align: baseline;
+		vertical-align: middle;
+		max-width: 100%;
+		white-space: nowrap;
+		box-shadow: 0 1px 0 hsl(var(--background) / 0.4) inset;
+	}
+
+	.markdown-content :global(.doc-link-chip > span:last-child) {
+		display: block;
+		min-width: 0;
+		max-width: min(32ch, calc(100vw - 8rem));
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.markdown-content :global(.doc-link-chip:hover) {
@@ -627,18 +646,26 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
-		padding: 0.15em 0.5em 0.15em 0.4em;
-		margin: 0.15em 0.1em;
+		padding: 0.16em 0.55em 0.16em 0.42em;
+		margin: 0.04em 0.16em 0.1em 0;
 		font-size: 0.875em;
 		font-weight: 500;
 		line-height: 1.5;
-		border-radius: 5px;
+		border-radius: 999px;
 		color: hsl(var(--foreground));
 		background: hsl(var(--muted) / 0.45);
 		border: 1px solid hsl(var(--border) / 0.3);
 		text-decoration: none;
 		transition: all 0.15s ease;
-		vertical-align: baseline;
+		vertical-align: middle;
+		max-width: 100%;
+		white-space: nowrap;
+	}
+
+	.markdown-content :global(.ext-link-chip > span) {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.markdown-content :global(.ext-link-chip:hover) {
@@ -1043,7 +1070,8 @@
 	.markdown-content :global(.tag-chip) {
 		display: inline-flex;
 		align-items: center;
-		padding: 0.1em 0.55em;
+		padding: 0.12em 0.62em;
+		margin: 0.04em 0.16em 0.1em 0;
 		font-size: 0.8125em;
 		font-weight: 600;
 		line-height: 1.5;
@@ -1055,6 +1083,7 @@
 		cursor: pointer;
 		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 		white-space: nowrap;
+		vertical-align: middle;
 	}
 
 	.markdown-content :global(.tag-chip:hover) {
@@ -1308,9 +1337,10 @@
 	   ================================ */
 	.markdown-content :global(.code-block-container) {
 		position: relative;
-		margin-bottom: 1.25rem;
+		margin: 1.5rem 0;
 		border-radius: 8px;
-		border: 1px solid hsl(var(--border) / 0.45);
+		background-color: hsl(var(--muted) / 0.15);
+		border: 1px solid hsl(var(--border) / 0.5);
 		overflow: hidden;
 	}
 
@@ -1319,32 +1349,27 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.4rem 0.75rem;
-		background: hsl(var(--muted) / 0.55);
-		border-bottom: 1px solid hsl(var(--border) / 0.25);
+		padding: 0.5rem 1rem;
+		background: hsl(var(--muted) / 0.4);
+		border-bottom: 1px solid hsl(var(--border) / 0.3);
 	}
 
 	.markdown-content :global(.code-lang) {
-		font-size: 0.7rem;
-		font-weight: 700;
-		color: hsl(var(--primary));
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		padding: 0.15rem 0.45rem;
-		border-radius: 4px;
-		background: hsl(var(--primary) / 0.08);
+		font-size: 0.75rem;
+		font-family: var(--font-mono, monospace);
+		color: hsl(var(--muted-foreground));
+		text-transform: lowercase;
 	}
 
 	.markdown-content :global(.code-line-count) {
-		font-size: 0.625rem;
-		color: hsl(var(--muted-foreground) / 0.5);
+		font-size: 0.75rem;
+		color: hsl(var(--muted-foreground) / 0.6);
 		margin-left: auto;
-		transition: opacity 0.15s ease, transform 0.15s cubic-bezier(0.4,0,0.2,1);
+		transition: opacity 0.15s ease;
 	}
 
 	.markdown-content :global(.code-block-container:hover) :global(.code-line-count) {
 		opacity: 0;
-		transform: translateX(8px);
 		pointer-events: none;
 	}
 
@@ -1352,34 +1377,36 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		padding: 0.25rem;
+		padding: 0.35rem;
 		color: hsl(var(--muted-foreground));
 		background: transparent;
-		border: none;
-		border-radius: 4px;
+		border: 1px solid transparent;
+		border-radius: 6px;
 		cursor: pointer;
 		position: absolute;
-		right: 0.65rem;
+		right: 0.75rem;
 		top: 50%;
-		transform: translateY(-50%) scale(0.85);
+		transform: translateY(-50%);
 		opacity: 0;
-		transition: opacity 0.12s ease, transform 0.15s cubic-bezier(0.34,1.56,0.64,1), color 0.12s ease, background-color 0.12s ease;
+		transition: all 0.15s ease;
 	}
 
 	.markdown-content :global(.code-block-container:hover) :global(.code-copy-btn) {
 		opacity: 1;
-		transform: translateY(-50%) scale(1);
 	}
 
 	.markdown-content :global(.code-copy-btn:hover) {
 		color: hsl(var(--foreground));
-		background-color: hsl(var(--background) / 0.5);
+		background-color: hsl(var(--background));
+		border-color: hsl(var(--border));
+		box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 	}
 
 	.markdown-content :global(.code-copy-btn.copied) {
 		opacity: 1;
-		transform: translateY(-50%) scale(1);
-		color: hsl(142 71% 45%);
+		color: rgb(34, 197, 94);
+		border-color: rgba(34, 197, 94, 0.3);
+		background-color: rgba(34, 197, 94, 0.05);
 	}
 
 	.markdown-content :global(.code-block-container pre) {
@@ -1387,36 +1414,40 @@
 		border-radius: 0;
 		box-shadow: none;
 		border: none;
-		padding: 0.5rem 0.75rem;
+		background: transparent;
+		padding: 1rem 0;
+		overflow-x: auto;
 	}
 
 	.markdown-content :global(.code-block-container pre code) {
-		font-size: 0.8rem;
-		line-height: 1.15;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		padding: 0;
 	}
 
 	.markdown-content :global(.code-line) {
 		display: block;
-		line-height: 1.15;
+		padding: 0 1rem;
 	}
 
 	.markdown-content :global(.line-num) {
 		display: inline-block;
-		width: 2.2em;
-		margin-right: 0.75em;
+		width: 2.5em;
+		margin-right: 1rem;
 		text-align: right;
-		color: hsl(var(--muted-foreground) / 0.3);
+		color: hsl(var(--muted-foreground) / 0.4);
 		user-select: none;
-		font-size: 0.8em;
-		border-right: 1px solid hsl(var(--border) / 0.15);
-		padding-right: 0.6em;
+		font-size: 0.85em;
+		border-right: 1px solid hsl(var(--border) / 0.3);
+		padding-right: 0.75em;
 	}
 
 	.markdown-content :global(.code-line:hover .line-num) {
-		color: hsl(var(--muted-foreground) / 0.6);
+		color: hsl(var(--muted-foreground) / 0.8);
+		border-right-color: hsl(var(--border) / 0.6);
 	}
 
 	.markdown-content :global(.code-line:hover) {
-		background: hsl(var(--foreground) / 0.02);
+		background: hsl(var(--muted) / 0.2);
 	}
 </style>

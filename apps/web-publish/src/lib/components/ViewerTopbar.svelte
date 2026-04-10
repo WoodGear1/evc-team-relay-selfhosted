@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { slugifyPath } from '$lib/file-tree';
 	import { onMount } from 'svelte';
 	import type { CurrentUser, SearchResultHit, WebResourceKind } from '$lib/api';
@@ -8,17 +9,29 @@
 	interface Props {
 		currentSlug?: string;
 		currentPath?: string;
+		documentPath?: string;
+		share?: { kind: string; path: string; web_slug: string } | null;
 		resourceKind?: WebResourceKind;
 		currentUser?: CurrentUser | null;
 		enableSearch?: boolean;
+		canEdit?: boolean;
+		showHistory?: boolean;
+		gitRepoUrl?: string;
 	}
+
+	type SearchEventDetail = { query: string };
 
 	let {
 		currentSlug = '',
 		currentPath = '',
+		documentPath = '',
+		share = null,
 		resourceKind = 'share',
 		currentUser = null,
-		enableSearch = false
+		enableSearch = false,
+		canEdit = false,
+		showHistory = false,
+		gitRepoUrl = ''
 	}: Props = $props();
 
 	let query = $state('');
@@ -29,11 +42,30 @@
 	let selectedIndex = $state(0);
 	let profileOpen = $state(false);
 	let logoutPending = $state(false);
+	let overlayTop = $state(0);
 	let abortController: AbortController | null = null;
 	let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 	let rootEl: HTMLDivElement | null = null;
-	const loginHref = $derived(browser ? `/login?return=${encodeURIComponent(window.location.pathname)}` : '/login');
+	let inputEl = $state<HTMLInputElement | null>(null);
 
+	const loginHref = $derived(
+		browser
+			? `/login?return=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+			: '/login'
+	);
+	const historyHref = $derived(
+		showHistory && currentSlug && documentPath
+			? `/${currentSlug}/history?${new URLSearchParams({ path: documentPath }).toString()}`
+			: ''
+	);
+	const isHistoryPage = $derived($page.url.pathname.endsWith('/history'));
+	const gitEditHref = $derived(
+		gitRepoUrl && canEdit && share
+			? `${gitRepoUrl.replace(/\/+$/, '')}/edit/main/${encodeGitPath(
+					share.kind === 'folder' && documentPath ? `${share.path}/${documentPath}` : share.path
+				)}`
+			: ''
+	);
 	const userLabel = $derived(currentUser?.name || currentUser?.email || 'Account');
 	const userInitials = $derived(
 		(currentUser?.name || currentUser?.email || '?')
@@ -42,6 +74,43 @@
 			.map((part) => part[0]?.toUpperCase() || '')
 			.join('')
 	);
+	const isTagQuery = $derived(query.trim().startsWith('#'));
+	const searchTitle = $derived(isTagQuery ? 'Tag results' : 'Search results');
+	const searchCaption = $derived(
+		isTagQuery
+			? 'Documents containing this tag'
+			: 'Search by title, path, and content'
+	);
+
+	function encodeGitPath(path: string) {
+		return path
+			.split('/')
+			.filter(Boolean)
+			.map((segment) => encodeURIComponent(segment))
+			.join('/');
+	}
+
+	function syncOverlay() {
+		if (!browser || !rootEl) {
+			return;
+		}
+		overlayTop = Math.max(rootEl.getBoundingClientRect().bottom + 10, 0);
+	}
+
+	function closeSearch() {
+		open = false;
+		selectedIndex = 0;
+		errorMessage = '';
+	}
+
+	function clearSearch() {
+		query = '';
+		results = [];
+		errorMessage = '';
+		selectedIndex = 0;
+		open = false;
+		abortController?.abort();
+	}
 
 	async function runSearch(nextQuery: string) {
 		if (!browser || !currentSlug || !enableSearch) {
@@ -50,10 +119,7 @@
 
 		const trimmed = nextQuery.trim();
 		if (!trimmed) {
-			results = [];
-			errorMessage = '';
-			open = false;
-			selectedIndex = 0;
+			clearSearch();
 			return;
 		}
 
@@ -61,10 +127,12 @@
 		abortController = new AbortController();
 		isLoading = true;
 		errorMessage = '';
+		open = true;
+		syncOverlay();
 
 		try {
 			const response = await fetch(
-				`/api/search?slug=${encodeURIComponent(currentSlug)}&resourceKind=${resourceKind}&q=${encodeURIComponent(trimmed)}&limit=8`,
+				`/api/search?slug=${encodeURIComponent(currentSlug)}&resourceKind=${resourceKind}&q=${encodeURIComponent(trimmed)}&limit=10`,
 				{
 					signal: abortController.signal
 				}
@@ -73,8 +141,8 @@
 			if (!response.ok) {
 				throw new Error(payload.message || 'Search failed');
 			}
+
 			results = payload.results || [];
-			open = true;
 			selectedIndex = 0;
 		} catch (err) {
 			if ((err as Error).name === 'AbortError') {
@@ -82,7 +150,6 @@
 			}
 			errorMessage = err instanceof Error ? err.message : 'Search failed';
 			results = [];
-			open = true;
 		} finally {
 			isLoading = false;
 		}
@@ -90,23 +157,44 @@
 
 	function scheduleSearch(nextQuery: string) {
 		query = nextQuery;
+		open = Boolean(nextQuery.trim());
+		syncOverlay();
 		if (searchDebounce) {
 			clearTimeout(searchDebounce);
 		}
+		if (!nextQuery.trim()) {
+			clearSearch();
+			return;
+		}
 		searchDebounce = setTimeout(() => {
 			void runSearch(nextQuery);
-		}, 180);
+		}, 140);
+	}
+
+	function applyExternalQuery(nextQuery: string) {
+		query = nextQuery;
+		open = Boolean(nextQuery.trim());
+		syncOverlay();
+		void runSearch(nextQuery);
+		inputEl?.focus();
 	}
 
 	async function selectResult(result: SearchResultHit) {
-		open = false;
-		query = '';
-		results = [];
-		errorMessage = '';
+		clearSearch();
+		profileOpen = false;
+		if (isHistoryPage) {
+			await goto(`/${currentSlug}/history?${new URLSearchParams({ path: result.path }).toString()}`);
+			return;
+		}
 		await goto(`/${currentSlug}/${slugifyPath(result.path)}`);
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			closeSearch();
+			return;
+		}
+
 		if (!open || results.length === 0) {
 			return;
 		}
@@ -120,8 +208,6 @@
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
 			void selectResult(results[selectedIndex]);
-		} else if (event.key === 'Escape') {
-			open = false;
 		}
 	}
 
@@ -141,16 +227,31 @@
 			return;
 		}
 
+		syncOverlay();
+
 		const handlePointerDown = (event: MouseEvent) => {
 			if (rootEl && !rootEl.contains(event.target as Node)) {
-				open = false;
+				closeSearch();
 				profileOpen = false;
+			}
+		};
+		const handleExternalSearch = (event: Event) => {
+			const detail = (event as CustomEvent<SearchEventDetail>).detail;
+			if (detail?.query) {
+				applyExternalQuery(detail.query);
 			}
 		};
 
 		document.addEventListener('mousedown', handlePointerDown);
+		window.addEventListener('resize', syncOverlay);
+		window.addEventListener('scroll', syncOverlay, true);
+		window.addEventListener('relay:search', handleExternalSearch as EventListener);
+
 		return () => {
 			document.removeEventListener('mousedown', handlePointerDown);
+			window.removeEventListener('resize', syncOverlay);
+			window.removeEventListener('scroll', syncOverlay, true);
+			window.removeEventListener('relay:search', handleExternalSearch as EventListener);
 			abortController?.abort();
 			if (searchDebounce) {
 				clearTimeout(searchDebounce);
@@ -161,59 +262,126 @@
 
 <div class="viewer-topbar" bind:this={rootEl}>
 	{#if enableSearch}
-		<div class="search-shell">
-			<label class="search-input-wrap" aria-label="Search files">
-				<svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<circle cx="11" cy="11" r="8"></circle>
-					<path d="m21 21-4.35-4.35"></path>
-				</svg>
-				<input
-					type="search"
-					value={query}
-					placeholder="Search this space"
-					oninput={(event) => scheduleSearch((event.currentTarget as HTMLInputElement).value)}
-					onfocus={() => {
-						if (query.trim()) open = true;
-					}}
-					onkeydown={handleKeydown}
-				/>
-				{#if isLoading}
-					<span class="search-status">
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-spinner"><circle cx="12" cy="12" r="10" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/></svg>
-					</span>
-				{/if}
-			</label>
-
-			{#if open}
-				<div class="search-backdrop"></div>
-				<div class="search-panel">
-					{#if errorMessage}
-						<div class="search-empty">{errorMessage}</div>
-					{:else if results.length === 0}
-						<div class="search-empty">No matches yet. Try another phrase.</div>
-					{:else}
-						{#each results as result, index}
-							<button
-								type="button"
-								class="search-result"
-								class:active={selectedIndex === index}
-								onclick={() => void selectResult(result)}
-							>
-								<div class="search-result-head">
-									<span class="search-result-name">{result.name}</span>
-									{#if slugifyPath(result.path) === currentPath}
-										<span class="search-result-current">Current</span>
-									{/if}
-								</div>
-								<div class="search-result-path">{result.path}</div>
-								<div class="search-result-snippet">{result.snippet}</div>
-							</button>
-						{/each}
+		<div class="search-shell" class:is-open={open}>
+			<div class="search-box">
+				<label class="search-input-wrap" aria-label="Search files">
+					<svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<circle cx="11" cy="11" r="8"></circle>
+						<path d="m21 21-4.35-4.35"></path>
+					</svg>
+					<input
+						bind:this={inputEl}
+						type="search"
+						value={query}
+						placeholder="Search docs, jump to file, or type #tag"
+						autocomplete="off"
+						spellcheck="false"
+						oninput={(event) => scheduleSearch((event.currentTarget as HTMLInputElement).value)}
+						onfocus={() => {
+							if (query.trim()) {
+								open = true;
+								syncOverlay();
+							}
+						}}
+						onkeydown={handleKeydown}
+					/>
+					{#if isLoading}
+						<span class="search-status" aria-hidden="true">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-spinner"><circle cx="12" cy="12" r="10" opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path></svg>
+						</span>
+					{:else if query}
+						<button type="button" class="search-clear" onclick={clearSearch} aria-label="Clear search">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+						</button>
 					{/if}
-				</div>
-			{/if}
+				</label>
+
+				{#if open}
+					<button
+						type="button"
+						class="search-underlay"
+						style={`top:${overlayTop}px;`}
+						aria-label="Close search"
+						onclick={closeSearch}
+					></button>
+
+					<div class="search-panel" aria-label="Search results">
+						<div class="search-panel__header">
+							<div class="search-panel__meta">
+								<div class="search-panel__title">{searchTitle}</div>
+								<div class="search-panel__caption">{searchCaption}</div>
+							</div>
+							<div class="search-panel__hint">
+								<kbd>Esc</kbd>
+								<span>close</span>
+							</div>
+						</div>
+
+						{#if errorMessage}
+							<div class="search-empty">
+								<strong>Search failed</strong>
+								<span>{errorMessage}</span>
+							</div>
+						{:else if results.length === 0}
+							<div class="search-empty">
+								<strong>{isLoading ? 'Searching…' : 'No matches yet'}</strong>
+								<span>{isTagQuery ? 'Try another tag or remove the # prefix.' : 'Try a filename, path fragment, or a different keyword.'}</span>
+							</div>
+						{:else}
+							<div class="search-results">
+								{#each results as result, index}
+									<button
+										type="button"
+										class="search-result"
+										class:is-active={selectedIndex === index}
+										onclick={() => void selectResult(result)}
+									>
+										<div class="search-result__main">
+											<div class="search-result__title-row">
+												<span class="search-result__name">{result.name}</span>
+												{#if slugifyPath(result.path) === currentPath}
+													<span class="search-result__badge">Current</span>
+												{/if}
+												{#if isTagQuery}
+													<span class="search-result__badge search-result__badge--tag">{query.trim()}</span>
+												{/if}
+											</div>
+											<div class="search-result__path">{result.path}</div>
+											<div class="search-result__snippet">{result.snippet}</div>
+										</div>
+										<svg class="search-result__arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+											<path d="M5 12h14"></path>
+											<path d="m13 5 7 7-7 7"></path>
+										</svg>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
 		</div>
 	{/if}
+
+	<div class="topbar-actions">
+		{#if historyHref}
+			<a class="topbar-link" class:active={isHistoryPage} href={historyHref} title="Version history">
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<path d="M12 8v4l3 3"></path>
+					<circle cx="12" cy="12" r="9"></circle>
+				</svg>
+				<span>History</span>
+			</a>
+		{/if}
+		{#if gitEditHref}
+			<a class="topbar-link" href={gitEditHref} target="_blank" rel="noopener noreferrer" title="Edit on GitHub">
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+					<path d="M12 2C6.477 2 2 6.589 2 12.25c0 4.53 2.865 8.37 6.839 9.727.5.096.683-.223.683-.496 0-.245-.009-.894-.014-1.755-2.782.62-3.369-1.37-3.369-1.37-.455-1.188-1.11-1.504-1.11-1.504-.908-.637.069-.624.069-.624 1.004.072 1.533 1.056 1.533 1.056.892 1.565 2.341 1.113 2.91.851.091-.667.349-1.113.635-1.369-2.221-.26-4.556-1.14-4.556-5.073 0-1.121.39-2.038 1.029-2.756-.103-.26-.446-1.307.098-2.725 0 0 .84-.276 2.75 1.053A9.303 9.303 0 0 1 12 6.84a9.3 9.3 0 0 1 2.504.348c1.909-1.329 2.748-1.053 2.748-1.053.545 1.418.202 2.465.1 2.725.64.718 1.027 1.635 1.027 2.756 0 3.943-2.339 4.81-4.567 5.064.359.318.679.946.679 1.907 0 1.377-.012 2.487-.012 2.825 0 .275.18.596.688.495C19.138 20.616 22 16.778 22 12.25 22 6.589 17.523 2 12 2Z"></path>
+				</svg>
+				<span>Edit on GitHub</span>
+			</a>
+		{/if}
+	</div>
 
 	<div class="profile-shell">
 		{#if currentUser}
@@ -222,7 +390,7 @@
 				class="profile-button"
 				onclick={() => {
 					profileOpen = !profileOpen;
-					open = false;
+					closeSearch();
 				}}
 			>
 				<span class="profile-avatar">{userInitials}</span>
@@ -257,13 +425,14 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		margin-bottom: 1.25rem;
+		margin-bottom: 1rem;
 		position: sticky;
 		top: 0;
-		z-index: 30;
-		padding: 0.5rem 0;
-		background: hsl(var(--background) / 0.85);
-		backdrop-filter: blur(12px);
+		z-index: 40;
+		padding: 0.55rem 0;
+		background: hsl(var(--background) / 0.9);
+		backdrop-filter: blur(10px);
+		border-bottom: 1px solid hsl(var(--border) / 0.22);
 	}
 
 	.search-shell {
@@ -272,279 +441,418 @@
 		min-width: 0;
 	}
 
-	.profile-shell {
+	.search-shell.is-open {
+		z-index: 90;
+	}
+
+	.search-box {
 		position: relative;
-		flex-shrink: 0;
 	}
 
 	.search-input-wrap {
 		position: relative;
-		z-index: 41;
+		z-index: 3;
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		height: 2.5rem;
+		gap: 0.6rem;
+		min-height: 2.75rem;
 		width: 100%;
-		padding: 0 0.75rem;
-		border-radius: 0.75rem;
+		padding: 0 0.95rem;
+		border-radius: 0.95rem;
 		border: 1px solid hsl(var(--border) / 0.45);
-		background: hsl(var(--card));
-		transition: border-color 0.2s ease, box-shadow 0.2s ease;
+		background:
+			linear-gradient(180deg, hsl(var(--card) / 0.98), hsl(var(--card) / 0.92));
+		box-shadow: 0 8px 24px hsl(220 30% 5% / 0.05);
+		transition:
+			border-color 0.18s ease,
+			box-shadow 0.18s ease,
+			transform 0.18s ease;
 	}
 
 	.search-input-wrap:focus-within {
 		border-color: hsl(var(--primary) / 0.35);
-		box-shadow: 0 0 0 2px hsl(var(--primary) / 0.06);
+		box-shadow:
+			0 0 0 4px hsl(var(--primary) / 0.08),
+			0 22px 48px hsl(220 30% 5% / 0.12);
+		transform: translateY(-1px);
 	}
 
-	.search-icon {
-		color: hsl(var(--muted-foreground));
+	.search-icon,
+	.search-status,
+	.search-clear,
+	.search-result__arrow {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		flex-shrink: 0;
-		width: 15px;
-		height: 15px;
+		color: hsl(var(--muted-foreground));
 	}
 
 	.search-input-wrap input {
 		flex: 1;
+		min-width: 0;
+		height: 100%;
 		border: 0;
 		background: transparent;
 		outline: none;
 		color: hsl(var(--foreground));
-		min-width: 0;
-		font-size: 0.875rem;
-		height: 100%;
+		font-size: 0.92rem;
 	}
 
 	.search-input-wrap input::placeholder {
 		color: hsl(var(--muted-foreground));
 	}
 
-	.search-status {
-		display: inline-flex;
-		align-items: center;
-		color: hsl(var(--muted-foreground));
+	.search-clear {
+		width: 1.85rem;
+		height: 1.85rem;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		cursor: pointer;
 	}
 
-	.search-status :global(.search-spinner) {
-		animation: spin 0.7s linear infinite;
+	.search-clear:hover {
+		color: hsl(var(--foreground));
+		background: hsl(var(--muted) / 0.75);
 	}
 
-	@keyframes spin {
-		to { transform: rotate(360deg); }
-	}
-
-	.search-backdrop {
+	.search-underlay {
 		position: fixed;
-		inset: 0;
-		z-index: 39;
-		background: hsl(var(--background) / 0.35);
-		backdrop-filter: blur(4px);
-		-webkit-backdrop-filter: blur(4px);
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 1;
+		border: 0;
+		background:
+			linear-gradient(180deg, hsl(var(--background) / 0.08), hsl(var(--background) / 0.28));
+		backdrop-filter: blur(10px);
+		-webkit-backdrop-filter: blur(10px);
 	}
 
 	.search-panel {
 		position: absolute;
-		top: calc(100% + 0.35rem);
+		top: calc(100% + 0.75rem);
 		left: 0;
-		width: 100%;
-		max-height: 420px;
-		overflow-y: auto;
-		border-radius: 0.75rem;
-		border: 1px solid hsl(var(--border) / 0.4);
-		background: hsl(var(--card) / 0.82);
-		backdrop-filter: blur(20px);
-		-webkit-backdrop-filter: blur(20px);
-		box-shadow: 0 8px 32px hsl(var(--background) / 0.35);
-		padding: 0.35rem;
-		z-index: 40;
-	}
-
-	.profile-menu {
-		position: absolute;
-		top: calc(100% + 0.35rem);
 		right: 0;
-		width: 240px;
-		border-radius: 0.75rem;
-		border: 1px solid hsl(var(--border) / 0.5);
-		background: hsl(var(--card) / 0.97);
-		backdrop-filter: blur(18px);
-		box-shadow: 0 12px 40px hsl(var(--background) / 0.3);
-		padding: 0.35rem;
+		z-index: 2;
+		border-radius: 1.1rem;
+		border: 1px solid hsl(var(--border) / 0.45);
+		background: hsl(var(--card) / 0.96);
+		box-shadow:
+			0 26px 80px hsl(220 35% 5% / 0.22),
+			0 1px 0 hsl(var(--border) / 0.35);
+		overflow: hidden;
 	}
 
-	.search-empty {
-		padding: 0.75rem 0.75rem;
-		color: hsl(var(--muted-foreground));
-		font-size: 0.85rem;
-	}
-
-	.search-result {
-		display: block;
-		width: 100%;
-		padding: 0.5rem 0.65rem;
-		border: none;
-		border-radius: 0.375rem;
-		background: transparent;
-		text-align: left;
-		cursor: pointer;
-		transition: background-color 0.12s ease;
-	}
-
-	.search-result:hover,
-	.search-result.active {
-		background: hsl(var(--muted) / 0.6);
-	}
-
-	.search-result-head {
+	.search-panel__header {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
 		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.95rem 1rem 0.85rem;
+		border-bottom: 1px solid hsl(var(--border) / 0.28);
+		background: linear-gradient(180deg, hsl(var(--muted) / 0.45), transparent);
 	}
 
-	.search-result-name {
-		font-weight: 600;
-		font-size: 0.8125rem;
+	.search-panel__title {
+		font-size: 0.8rem;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
 		color: hsl(var(--foreground));
 	}
 
-	.search-result-current {
-		font-size: 0.6rem;
-		padding: 0.1rem 0.35rem;
+	.search-panel__caption {
+		margin-top: 0.18rem;
+		font-size: 0.79rem;
+		color: hsl(var(--muted-foreground));
+	}
+
+	.search-panel__hint {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.72rem;
+		color: hsl(var(--muted-foreground));
+		white-space: nowrap;
+	}
+
+	.search-panel__hint kbd {
+		padding: 0.16rem 0.42rem;
+		border-radius: 0.45rem;
+		border: 1px solid hsl(var(--border) / 0.55);
+		background: hsl(var(--background) / 0.8);
+		font: 700 0.66rem/1 var(--font-mono, monospace);
+	}
+
+	.search-results {
+		display: flex;
+		flex-direction: column;
+		max-height: min(68vh, 36rem);
+		overflow: auto;
+	}
+
+	.search-empty {
+		display: flex;
+		flex-direction: column;
+		gap: 0.28rem;
+		padding: 1rem;
+		font-size: 0.84rem;
+		color: hsl(var(--muted-foreground));
+	}
+
+	.search-empty strong {
+		color: hsl(var(--foreground));
+		font-size: 0.86rem;
+	}
+
+	.search-result {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 0.85rem;
+		width: 100%;
+		padding: 0.95rem 1rem;
+		border: 0;
+		border-bottom: 1px solid hsl(var(--border) / 0.22);
+		background: transparent;
+		color: hsl(var(--foreground));
+		text-align: left;
+		cursor: pointer;
+		transition: background 0.14s ease, border-color 0.14s ease;
+	}
+
+	.search-result:last-child {
+		border-bottom: 0;
+	}
+
+	.search-result:hover,
+	.search-result.is-active {
+		background: hsl(var(--primary) / 0.06);
+	}
+
+	.search-result__main {
+		display: flex;
+		flex-direction: column;
+		gap: 0.34rem;
+		min-width: 0;
+	}
+
+	.search-result__title-row {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		flex-wrap: wrap;
+	}
+
+	.search-result__name {
+		font-size: 0.92rem;
+		font-weight: 700;
+	}
+
+	.search-result__path {
+		font-size: 0.76rem;
+		color: hsl(var(--muted-foreground));
+		word-break: break-word;
+	}
+
+	.search-result__snippet {
+		font-size: 0.79rem;
+		line-height: 1.5;
+		color: hsl(var(--foreground) / 0.8);
+	}
+
+	.search-result__badge {
+		padding: 0.12rem 0.4rem;
 		border-radius: 999px;
 		background: hsl(var(--primary) / 0.12);
 		color: hsl(var(--primary));
+		font-size: 0.68rem;
+		font-weight: 700;
 	}
 
-	.search-result-path {
-		font-size: 0.6875rem;
-		color: hsl(var(--muted-foreground));
-		margin-top: 0.1rem;
+	.search-result__badge--tag {
+		background: hsl(var(--accent) / 0.16);
+		color: hsl(var(--accent-foreground));
 	}
 
-	.search-result-snippet {
-		font-size: 0.75rem;
-		color: hsl(var(--muted-foreground));
-		margin-top: 0.15rem;
-		line-height: 1.35;
-		overflow: hidden;
-		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		-webkit-box-orient: vertical;
+	.search-result:hover .search-result__arrow,
+	.search-result.is-active .search-result__arrow {
+		color: hsl(var(--primary));
 	}
 
+	.topbar-actions,
+	.profile-shell {
+		flex-shrink: 0;
+	}
+
+	.topbar-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.topbar-link,
 	.profile-button,
 	.login-link {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.55rem;
 		height: 2.5rem;
-		padding: 0 0.75rem;
-		border-radius: 0.75rem;
-		border: 1px solid hsl(var(--border) / 0.45);
-		background: hsl(var(--card) / 0.82);
-		backdrop-filter: blur(16px);
+		padding: 0 0.8rem;
+		border-radius: 0.8rem;
+		border: 1px solid hsl(var(--border) / 0.42);
+		background: hsl(var(--card) / 0.92);
 		color: hsl(var(--foreground));
 		text-decoration: none;
-		white-space: nowrap;
-		font-size: 0.875rem;
-		cursor: pointer;
-		transition: background-color 0.2s ease, border-color 0.2s ease;
+		box-shadow: 0 10px 24px hsl(220 30% 5% / 0.03);
 	}
 
+	.topbar-link {
+		font-size: 0.84rem;
+		white-space: nowrap;
+	}
+
+	.topbar-link:hover,
 	.profile-button:hover,
 	.login-link:hover {
-		background: hsl(var(--primary) / 0.07);
+		background: hsl(var(--primary) / 0.06);
 		border-color: hsl(var(--primary) / 0.2);
 		text-decoration: none;
 	}
 
+	.topbar-link.active {
+		background: hsl(var(--primary) / 0.1);
+		border-color: hsl(var(--primary) / 0.26);
+		color: hsl(var(--primary));
+	}
+
+	.profile-shell {
+		position: relative;
+	}
+
+	.profile-button {
+		cursor: pointer;
+	}
+
 	.profile-avatar {
+		width: 1.9rem;
+		height: 1.9rem;
+		border-radius: 999px;
+		background: hsl(var(--primary) / 0.14);
+		color: hsl(var(--primary));
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 1.75rem;
-		height: 1.75rem;
-		border-radius: 999px;
-		background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
-		color: hsl(var(--primary-foreground));
-		font-size: 0.68rem;
+		font-size: 0.72rem;
 		font-weight: 700;
-		flex-shrink: 0;
 	}
 
 	.profile-copy {
 		display: flex;
 		flex-direction: column;
-		align-items: flex-start;
 		min-width: 0;
-		line-height: 1.2;
 	}
 
-	.profile-name,
-	.profile-email,
-	.profile-menu-name,
-	.profile-menu-email {
-		max-width: 12rem;
+	.profile-name {
+		font-size: 0.82rem;
+		font-weight: 650;
+	}
+
+	.profile-email {
+		font-size: 0.72rem;
+		color: hsl(var(--muted-foreground));
+		max-width: 13rem;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.profile-name,
-	.profile-menu-name {
-		font-size: 0.8rem;
-		font-weight: 600;
-	}
-
-	.profile-email,
-	.profile-menu-email {
-		font-size: 0.68rem;
-		color: hsl(var(--muted-foreground));
+	.profile-menu {
+		position: absolute;
+		top: calc(100% + 0.45rem);
+		right: 0;
+		min-width: 15rem;
+		padding: 0.5rem;
+		border-radius: 0.95rem;
+		border: 1px solid hsl(var(--border) / 0.4);
+		background: hsl(var(--card) / 0.98);
+		box-shadow: 0 24px 60px hsl(222 47% 11% / 0.16);
+		z-index: 100;
 	}
 
 	.profile-menu-user {
-		padding: 0.6rem 0.7rem;
-		border-bottom: 1px solid hsl(var(--border) / 0.35);
-		margin-bottom: 0.25rem;
+		padding: 0.55rem 0.65rem 0.7rem;
+		border-bottom: 1px solid hsl(var(--border) / 0.3);
+		margin-bottom: 0.35rem;
+	}
+
+	.profile-menu-name {
+		font-size: 0.85rem;
+		font-weight: 700;
+	}
+
+	.profile-menu-email {
+		font-size: 0.76rem;
+		color: hsl(var(--muted-foreground));
+		word-break: break-all;
 	}
 
 	.profile-menu-link {
 		display: flex;
 		width: 100%;
-		align-items: center;
-		padding: 0.6rem 0.7rem;
-		border-radius: 0.5rem;
+		padding: 0.65rem;
+		border-radius: 0.7rem;
+		border: 0;
+		background: transparent;
 		color: hsl(var(--foreground));
 		text-decoration: none;
-		border: none;
-		background: transparent;
-		font-size: 0.85rem;
+		font-size: 0.82rem;
 		cursor: pointer;
-		transition: background-color 0.15s ease;
+		text-align: left;
 	}
 
 	.profile-menu-link:hover {
-		background: hsl(var(--primary) / 0.07);
-		text-decoration: none;
+		background: hsl(var(--primary) / 0.06);
 	}
 
 	.profile-menu-link.danger {
 		color: hsl(var(--destructive));
 	}
 
-	@media (max-width: 768px) {
-		.viewer-topbar {
-			padding-left: 3rem;
+	.search-spinner {
+		animation: spin 0.9s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
 		}
 	}
 
-	@media (max-width: 480px) {
+	@media (max-width: 980px) {
 		.viewer-topbar {
-			padding-left: 3rem;
+			flex-wrap: wrap;
 		}
 
-		.profile-button .profile-copy {
+		.search-shell {
+			order: 3;
+			width: 100%;
+		}
+
+		.topbar-actions {
+			margin-left: auto;
+		}
+
+		.profile-copy {
+			display: none;
+		}
+
+		.search-result {
+			grid-template-columns: 1fr;
+		}
+
+		.search-result__arrow {
 			display: none;
 		}
 	}

@@ -1,10 +1,11 @@
 import type { LayoutServerLoad } from './$types';
-import { getCurrentUser, getServerInfo, refreshAccessToken } from '$lib/api';
+import { HttpStatusError, getCurrentUser, getServerInfo, refreshAccessToken } from '$lib/api';
+import { buildCookieOptions, deleteCookie, isSecureRequest } from '$lib/auth';
 
 // Public URL for control plane (for branding assets)
 const PUBLIC_CONTROL_PLANE_URL = process.env.PUBLIC_CONTROL_PLANE_URL || '';
 
-export const load: LayoutServerLoad = async ({ url, cookies }) => {
+export const load: LayoutServerLoad = async ({ url, cookies, request }) => {
 	// Fetch server info for branding
 	const serverInfo = await getServerInfo();
 
@@ -20,39 +21,47 @@ export const load: LayoutServerLoad = async ({ url, cookies }) => {
 		}
 	}
 
-	const secure = url.protocol === 'https:';
+	const secure = isSecureRequest(url, request.headers);
 	let accessToken = cookies.get('auth_token') || undefined;
 	const refreshToken = cookies.get('refresh_token');
 
 	if (accessToken) {
 		try {
 			currentUser = await getCurrentUser(accessToken);
-		} catch {
+		} catch (error) {
 			if (refreshToken) {
 				try {
 					const refreshed = await refreshAccessToken(refreshToken);
 					accessToken = refreshed.access_token;
-					cookies.set('auth_token', refreshed.access_token, {
-						path: '/',
-						httpOnly: true,
-						secure,
-						sameSite: 'lax',
-						maxAge: refreshed.expires_in || 86400
-					});
-					cookies.set('refresh_token', refreshed.refresh_token, {
-						path: '/',
-						httpOnly: true,
-						secure,
-						sameSite: 'lax',
-						maxAge: 60 * 60 * 24 * 30
-					});
+					cookies.set(
+						'auth_token',
+						refreshed.access_token,
+						buildCookieOptions(secure, {
+							maxAge: refreshed.expires_in || 86400
+						})
+					);
+					cookies.set(
+						'refresh_token',
+						refreshed.refresh_token,
+						buildCookieOptions(secure, {
+							maxAge: 60 * 60 * 24 * 30
+						})
+					);
 					currentUser = await getCurrentUser(refreshed.access_token);
-				} catch {
-					cookies.delete('auth_token', { path: '/' });
-					cookies.delete('refresh_token', { path: '/' });
+				} catch (refreshError) {
+					if (
+						refreshError instanceof HttpStatusError &&
+						(refreshError.status === 401 || refreshError.status === 403)
+					) {
+						deleteCookie(cookies, 'auth_token', secure);
+						deleteCookie(cookies, 'refresh_token', secure);
+					}
 				}
-			} else {
-				cookies.delete('auth_token', { path: '/' });
+			} else if (
+				error instanceof HttpStatusError &&
+				(error.status === 401 || error.status === 403)
+			) {
+				deleteCookie(cookies, 'auth_token', secure);
 			}
 		}
 	}

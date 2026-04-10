@@ -16,12 +16,26 @@
  */
 
 import { Marked, type Token, type Tokens } from 'marked';
-import { markedHighlight } from 'marked-highlight';
 import markedFootnote from 'marked-footnote';
-import hljs from 'highlight.js';
+import { createHighlighter, type Highlighter } from 'shiki';
 import katex from 'katex';
 import DOMPurify from 'isomorphic-dompurify';
 import { processCustomBlocks } from './customBlocks';
+
+// ---------------------------------------------------------------------------
+// Shiki Highlighter instance
+// ---------------------------------------------------------------------------
+let highlighterInstance: Highlighter | null = null;
+
+async function getHighlighterInstance() {
+	if (!highlighterInstance) {
+		highlighterInstance = await createHighlighter({
+			themes: ['github-light', 'vitesse-dark'],
+			langs: ['javascript', 'typescript', 'html', 'css', 'json', 'bash', 'yaml', 'markdown', 'rust', 'python', 'go', 'cpp', 'c', 'java', 'sql', 'php', 'swift', 'ruby']
+		});
+	}
+	return highlighterInstance;
+}
 
 // ---------------------------------------------------------------------------
 // HTML escaping utility (defense-in-depth before DOMPurify)
@@ -567,17 +581,7 @@ function walkTokensForTaskLists(token: Token): void {
 // ---------------------------------------------------------------------------
 
 const marked = new Marked(
-	markedHighlight({
-		langPrefix: 'hljs language-',
-		highlight(code, lang) {
-			// Mermaid: pass through as a special div instead of highlighting
-			if (lang === 'mermaid') {
-				return code;
-			}
-			const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-			return hljs.highlight(code, { language }).value;
-		}
-	}),
+	{ async: true } as any,
 	markedFootnote()
 );
 
@@ -640,31 +644,53 @@ marked.use({
 			return `<div class="callout ${colorClass} ${typeClass}"><div class="callout-header">${titleHtml}</div>${contentWrapper}</div>\n`;
 		},
 
-		code(token: Tokens.Code) {
-			if (token.lang === 'mermaid') {
-				return `<div class="mermaid">${token.text}</div>\n`;
-			}
+		code(token: Tokens.Code): string | false | any {
+			// Await this properly in an async context, or mark as any for now because Marked async is tricky with types
+			const p = (async () => {
+				if (token.lang === 'mermaid') {
+					return `<div class="mermaid">${token.text}</div>\n`;
+				}
 
-			const lang = token.lang || 'text';
-			const langDisplay = lang.charAt(0).toUpperCase() + lang.slice(1);
-			const langClass = ` class="hljs language-${lang}"`;
-			const codeContent = token.text;
+				const requestedLang = (token.lang || 'text').trim().toLowerCase();
+				const highlighter = await getHighlighterInstance();
+				
+				// Check if language is supported by Shiki, otherwise fallback to text
+				const loadedLangs = highlighter.getLoadedLanguages();
+				const language = loadedLangs.includes(requestedLang as any) ? requestedLang : 'text';
+				
+				const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
+				const codeContent = token.text;
+				
+				// Highlight with both themes
+				const highlightedHtml = highlighter.codeToHtml(codeContent, {
+					lang: language,
+					themes: {
+						light: 'github-light',
+						dark: 'vitesse-dark'
+					},
+					defaultColor: false // Important for dual themes to work via CSS variables
+				});
 
-			// Build line-numbered code
-			const rawLines = codeContent.split('\n');
-			// Remove trailing empty line that marked sometimes adds
-			if (rawLines.length > 1 && rawLines[rawLines.length - 1] === '') rawLines.pop();
-			const lineCount = rawLines.length;
-			const gutterWidth = String(lineCount).length;
+				// We need to parse the generated HTML to add our custom line numbers and UI
+				// Shiki outputs: <pre class="shiki shiki-themes..." style="..."><code...>...</code></pre>
+				// We'll wrap it in our UI
+				
+				const lineCount = codeContent.split('\n').length;
 
-			const numberedLines = rawLines
-				.map((line, i) => {
-					const num = String(i + 1).padStart(gutterWidth, ' ');
-					return `<span class="code-line"><span class="line-num" data-line="${i + 1}">${num}</span>${line}</span>`;
-				})
-				.join('\n');
-
-			return `<div class="code-block-container"><div class="code-block-header"><span class="code-lang">${langDisplay}</span><span class="code-line-count">${lineCount} lines</span><button class="code-copy-btn" aria-label="Copy code"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button></div><pre><code${langClass}>${numberedLines}</code></pre></div>\n`;
+				// Add a copy button and language header around the shiki output
+				return `<div class="code-block-container relative group my-6 rounded-xl bg-muted/15 border border-border/50 overflow-hidden shadow-sm">
+					<div class="code-block-header flex items-center justify-between px-4 py-2 bg-muted/40 backdrop-blur-md border-b border-border/30">
+						<span class="code-lang text-xs font-mono text-muted-foreground uppercase tracking-wider">${langDisplay}</span>
+						<button class="code-copy-btn opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0 text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border rounded-md p-1.5 shadow-sm" aria-label="Copy code" title="Copy code">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+						</button>
+					</div>
+					<div class="shiki-wrapper overflow-x-auto text-[0.85rem] leading-[1.6]">
+						${highlightedHtml}
+					</div>
+				</div>\n`;
+			})();
+			return p as any;
 		},
 
 		listitem(this: unknown, token: Tokens.ListItem) {
@@ -839,7 +865,7 @@ export async function renderMarkdown(markdown: string, context?: RenderContext):
 	const preprocessed = preprocessMarkdown(markdown);
 
 	// Step 2: Parse with marked (extensions handle highlights, wikilinks, callouts, footnotes, mermaid)
-	const rawHtml = await marked.parse(preprocessed);
+	const rawHtml = await marked.parse(preprocessed) as string;
 
 	// Step 3: Restore math placeholders with KaTeX-rendered HTML
 	const withMath = restoreMath(rawHtml);

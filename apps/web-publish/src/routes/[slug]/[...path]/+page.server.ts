@@ -1,75 +1,28 @@
 import { error } from '@sveltejs/kit';
-import {
-	getShareBySlug,
-	getPublishedLinkBySlug,
-	validateSession,
-	validateUserToken,
-	checkShareMembership,
-	getFolderFileContent,
-	type WebResourceKind
-} from '$lib/api';
+import { getFolderFileContent } from '$lib/api';
 import { getPrevNextForPath, slugifyPath } from '$lib/file-tree';
+import {
+	applyPrivateCacheHeaders,
+	getRequestTokens,
+	requireDocumentAccess,
+	resolveWebAccessContext
+} from '$lib/webAccess';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ params, cookies }) => {
+export const load: PageServerLoad = async ({ params, cookies, setHeaders }) => {
 	const { slug, path } = params;
 
 	try {
-		const sessionToken = cookies.get('web_session');
-		const authTokenFromCookie = cookies.get('auth_token');
-
-		// Prefer published links when slug belongs to a link, but keep legacy share URLs working.
-		const linkShare = await getPublishedLinkBySlug(slug, {
-			sessionToken,
-			authToken: authTokenFromCookie
-		});
-		const share = linkShare
-			? linkShare
-			: await getShareBySlug(slug, {
-					sessionToken,
-					authToken: authTokenFromCookie
-				});
-		const resourceKind: WebResourceKind = linkShare ? 'link' : 'share';
+		const access = await resolveWebAccessContext(slug, getRequestTokens(cookies));
+		const { share, resourceKind } = access;
 
 		// Must be a folder share
 		if (share.kind !== 'folder') {
 			throw error(404, 'Not a folder share');
 		}
 
-		const isProtected = share.visibility === 'protected';
-
-		// For protected shares, check if user has valid session (password-based)
-		let isAuthenticated = false;
-		if (isProtected) {
-			if (sessionToken) {
-				const validation = await validateSession(slug, sessionToken, resourceKind);
-				isAuthenticated = validation.valid;
-			}
-		}
-
-		// Validate account access for member-only and protected shares.
-		let hasAccountAccess = false;
-		let authToken: string | undefined;
-		const requiresMemberAuth = share.visibility === 'private' || share.visibility === 'members';
-		if (isProtected || requiresMemberAuth) {
-			authToken = authTokenFromCookie;
-			if (authToken) {
-				const validation = await validateUserToken(authToken);
-				if (validation.valid) {
-					hasAccountAccess = await checkShareMembership(share.id, authToken);
-				} else {
-					authToken = undefined;
-				}
-			}
-		}
-
-		// Check authentication
-		if (isProtected && !isAuthenticated && !hasAccountAccess) {
-			throw error(401, 'Password required');
-		}
-		if (requiresMemberAuth && !hasAccountAccess) {
-			throw error(401, 'Authentication required');
-		}
+		applyPrivateCacheHeaders(setHeaders, access);
+		requireDocumentAccess(access);
 
 		// Find the file in folder items
 		// Support both exact match and slugified match (spaces → hyphens in URL)
@@ -92,8 +45,8 @@ export const load: PageServerLoad = async ({ params, cookies }) => {
 			const fileContent = await getFolderFileContent(
 				slug,
 				originalPath,
-				isProtected && isAuthenticated ? sessionToken : undefined,
-				authToken,
+				access.sessionToken,
+				access.authToken,
 				resourceKind
 			);
 			content = fileContent.has_content
@@ -118,6 +71,7 @@ export const load: PageServerLoad = async ({ params, cookies }) => {
 			file,
 			content,
 			filePath: slugifyPath(originalPath),
+			documentPath: originalPath,
 			parentSlug: slug,
 			folderItems,
 			previousPage: navigation.previous

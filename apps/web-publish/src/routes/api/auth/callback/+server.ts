@@ -1,8 +1,9 @@
 import { redirect } from '@sveltejs/kit';
 import { exchangeOAuthCode, getServerInfo } from '$lib/api';
+import { isSecureRequest, sanitizeReturnTo } from '$lib/auth';
 import type { RequestHandler } from './$types';
 
-export const GET: RequestHandler = async ({ url, cookies }) => {
+export const GET: RequestHandler = async ({ url, cookies, request }) => {
 	const code = url.searchParams.get('code');
 	const state = url.searchParams.get('state');
 	const error = url.searchParams.get('error');
@@ -10,7 +11,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 	// Get stored state and return URL
 	const storedState = cookies.get('oauth_state');
-	const returnTo = cookies.get('oauth_return') || '/';
+	const returnTo = sanitizeReturnTo(cookies.get('oauth_return'));
 
 	// Clear OAuth cookies
 	cookies.delete('oauth_state', { path: '/' });
@@ -64,14 +65,14 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		cookies.set('auth_token', tokenResponse.access_token, {
 			path: '/',
 			httpOnly: true,
-			secure: url.protocol === 'https:',
+			secure: isSecureRequest(url, request.headers),
 			sameSite: 'lax',
 			maxAge: tokenResponse.expires_in || 86400 // Default 24 hours
 		});
 		cookies.set('refresh_token', tokenResponse.refresh_token, {
 			path: '/',
 			httpOnly: true,
-			secure: url.protocol === 'https:',
+			secure: isSecureRequest(url, request.headers),
 			sameSite: 'lax',
 			maxAge: 60 * 60 * 24 * 30
 		});
