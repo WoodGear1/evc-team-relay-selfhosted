@@ -25,7 +25,7 @@ export function renderUnifiedDiff(container: HTMLElement, text: string): void {
 		} else if (line.startsWith("-")) {
 			variant = "del";
 		}
-		row.addClass(`evc-unified-diff__row evc-unified-diff__row--${variant}`);
+		row.addClass("evc-unified-diff__row", `evc-unified-diff__row--${variant}`);
 		const code = row.createEl("code");
 		code.setText(line);
 	}
