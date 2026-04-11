@@ -112,10 +112,26 @@ class Settings(BaseSettings):
         description="Domain for web publishing. If not set, web publishing is disabled.",
     )
 
+    # Git sync integration
+    git_sync_internal_token: str | None = Field(
+        default=None,
+        description="Shared secret for internal git-sync and yjs-bridge endpoints",
+    )
+    git_sync_repo_url: str | None = Field(
+        default=None,
+        description="Repository URL exposed in plugin and web UI for Git history links",
+    )
+    git_sync_branch: str = Field(default="main", description="Git branch used for exported history")
+
     @property
     def web_publish_enabled(self) -> bool:
         """Check if web publishing is enabled."""
         return bool(self.web_publish_domain)
+
+    @property
+    def git_sync_enabled(self) -> bool:
+        """Check if Git sync integration is enabled."""
+        return bool(self.git_sync_internal_token and self.git_sync_repo_url)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

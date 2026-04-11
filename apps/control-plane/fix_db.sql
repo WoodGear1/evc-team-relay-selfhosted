@@ -1,0 +1,1 @@
+ALTER TABLE shares ADD COLUMN IF NOT EXISTS git_sync_mode VARCHAR(10) NOT NULL DEFAULT 'manual';

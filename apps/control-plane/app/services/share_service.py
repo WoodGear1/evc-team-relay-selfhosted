@@ -149,6 +149,7 @@ def create_share(
         web_slug=web_slug,
         web_noindex=payload.web_noindex,
         web_sync_mode=payload.web_sync_mode,
+        git_sync_mode=payload.git_sync_mode,
     )
     db.add(share)
     db.commit()
@@ -287,6 +288,23 @@ def update_share(
         old_doc_id = share.web_doc_id
         changes["web_doc_id"] = {"old": old_doc_id is not None, "new": payload.web_doc_id != ""}
         share.web_doc_id = payload.web_doc_id if payload.web_doc_id else None
+
+    # Handle git sync updates
+    if payload.git_repo_url is not None:
+        changes["git_repo_url"] = {"old": share.git_repo_url, "new": payload.git_repo_url}
+        share.git_repo_url = payload.git_repo_url if payload.git_repo_url else None
+    
+    if payload.git_branch is not None:
+        changes["git_branch"] = {"old": share.git_branch, "new": payload.git_branch}
+        share.git_branch = payload.git_branch if payload.git_branch else None
+        
+    if payload.git_path is not None:
+        changes["git_path"] = {"old": share.git_path, "new": payload.git_path}
+        share.git_path = payload.git_path if payload.git_path else None
+
+    if payload.git_sync_mode is not None:
+        changes["git_sync_mode"] = {"old": share.git_sync_mode, "new": payload.git_sync_mode}
+        share.git_sync_mode = payload.git_sync_mode
 
     db.add(share)
     db.commit()
@@ -589,7 +607,11 @@ def list_user_shares(
                 web_slug=share.web_slug,
                 web_noindex=share.web_noindex,
                 web_sync_mode=share.web_sync_mode,
+                git_sync_mode=share.git_sync_mode,
                 web_url=get_web_url(share),
+                git_repo_url=share.git_repo_url,
+                git_branch=share.git_branch,
+                git_path=share.git_path,
             )
         )
 

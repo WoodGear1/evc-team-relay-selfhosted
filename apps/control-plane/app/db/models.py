@@ -213,6 +213,12 @@ class Share(Base, TimestampMixin):
     # Y-sweet document ID for real-time sync (S3RN encoded)
     web_doc_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
+    # Git sync fields
+    git_repo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    git_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    git_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    git_sync_mode: Mapped[str] = mapped_column(String(10), default="manual", nullable=False)
+
     owner: Mapped["User"] = relationship(back_populates="shares_owned")
     members: Mapped[list["ShareMember"]] = relationship(
         back_populates="share",

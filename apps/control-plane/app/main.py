@@ -20,6 +20,7 @@ from app.api.routers import (
     document_versions,
     files,
     health,
+    internal_git_sync,
     invites,
     keys,
     metrics,
@@ -118,6 +119,7 @@ Get a token by calling `POST /auth/login` with valid credentials.
 
     # Add rate limiter state
     app.state.limiter = limiter
+    app.state.git_sync_status = {}
 
     # Add middlewares (order matters - first added = outermost)
     app.add_middleware(PrometheusMiddleware)  # Metrics collection
@@ -172,6 +174,8 @@ Get a token by calling `POST /auth/login` with valid credentials.
     app.include_router(published_links.router, prefix="/v1")  # Published links CRUD
     app.include_router(comments.router, prefix="/v1")  # Comments API
     app.include_router(document_versions.router, prefix="/v1")  # Document versions API
+    if settings.git_sync_internal_token:
+        app.include_router(internal_git_sync.router)
     app.include_router(webhooks.router)  # Webhooks API (prefix included)
     app.include_router(webhooks.admin_router)  # Admin webhooks API (prefix included)
 

@@ -22,6 +22,8 @@ class ServerFeatures(BaseModel):
     oauth_provider: str | None = None
     web_publish_enabled: bool = False
     web_publish_domain: str | None = None
+    git_sync_enabled: bool = False
+    git_repo_url: str | None = None
 
 
 class ServerBranding(BaseModel):
@@ -43,6 +45,8 @@ class ServerInfo(BaseModel):
     edition: str  # "community" or "enterprise"
     relay_url: str
     features: ServerFeatures
+    git_sync_enabled: bool = False
+    git_repo_url: str | None = None
     branding: ServerBranding
 
 
@@ -74,6 +78,10 @@ def get_server_info(db: Session = Depends(get_db)) -> ServerInfo:
             oauth_provider=settings.oauth_provider_name if settings.oauth_enabled else None,
             web_publish_enabled=settings.web_publish_enabled,
             web_publish_domain=settings.web_publish_domain,
+            git_sync_enabled=settings.git_sync_enabled,
+            git_repo_url=settings.git_sync_repo_url,
         ),
+        git_sync_enabled=settings.git_sync_enabled,
+        git_repo_url=settings.git_sync_repo_url,
         branding=ServerBranding(**branding_data),
     )

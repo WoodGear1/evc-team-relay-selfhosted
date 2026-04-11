@@ -329,20 +329,20 @@ def _build_link_public_response(
     kind = "folder" if link.target_type == "folder" else "doc"
     return WebSharePublic(
         id=str(share.id),
-        published_link_id=str(link.id),
-        target_type=link.target_type,
-        target_id=link.target_id,
+        published_link_id=str(link.id) if link else None,
+        target_type=link.target_type if (link and include_content) else None,
+        target_id=link.target_id if (link and include_content) else None,
         kind=kind,
-        path=link.target_path,
+        path=link.target_path if include_content else "",
         visibility=link.access_mode.value,
         web_slug=link.slug,
         web_noindex=link.noindex,
-        title=link.title,
-        description=link.description,
-        page_title=link.page_title,
-        theme_preset=link.theme_preset,
+        title=link.title if (link and include_content) else None,
+        description=link.description if (link and include_content) else None,
+        page_title=link.page_title if (link and include_content) else None,
+        theme_preset=link.theme_preset if (link and include_content) else None,
         allow_comments=link.allow_comments and has_account_access,
-        page_metadata=link.page_metadata,
+        page_metadata=link.page_metadata if (link and include_content) else None,
         created_at=link.created_at,
         updated_at=link.updated_at,
         web_content=content if include_content and kind == "doc" else None,
@@ -487,7 +487,7 @@ def get_share_by_slug(
     return WebSharePublic(
         id=str(share.id),
         kind=share.kind.value,
-        path=share.path,
+        path=share.path if include_content else "",
         visibility=share.visibility.value,
         web_slug=share.web_slug,
         web_noindex=share.web_noindex,
@@ -913,20 +913,49 @@ def sync_folder_file_content(
             detail="This endpoint is only for folder shares",
         )
 
-    # For now, require authentication via session cookie
-    # TODO: Support plugin authentication via JWT token
-    session_token = request.cookies.get("web_session")
-    if not session_token:
-        # Try to validate JWT token from Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+    # Require JWT token from Authorization header
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required (JWT token)",
+        )
+
+    # Validate JWT and check user ownership/editor role
+    token = auth_header.split(" ")[1]
+    try:
+        from app.core import security as sec_module
+
+        payload = sec_module.decode_access_token(token)
+        user_id_str = payload.get("sub")
+        if not user_id_str:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required",
+                detail="Invalid token",
             )
-        # For now, just check if token exists - proper validation would require
-        # checking user ownership of the share
-        # This will be handled by plugin sending proper JWT tokens
+
+        from uuid import UUID
+
+        user_id = UUID(user_id_str)
+        if share.owner_user_id == user_id:
+            pass
+        else:
+            member_stmt = select(models.ShareMember).where(
+                models.ShareMember.share_id == share.id,
+                models.ShareMember.user_id == user_id,
+                models.ShareMember.role == models.ShareMemberRole.EDITOR,
+            )
+            member = db.execute(member_stmt).scalar_one_or_none()
+            if not member:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Editor role required to sync files",
+                )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
 
     # Update folder items with content
     folder_items = share.web_folder_items or []
@@ -1202,28 +1231,13 @@ def update_share_content(
         )
 
     # Check authentication and editor role
-    # For protected shares, validate session
-    if share.visibility == models.ShareVisibility.PROTECTED:
-        session_token = request.cookies.get("web_session")
-        if not session_token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required",
-            )
-        if not WebSessionService.validate_web_session(session_token, share.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid or expired session",
-            )
-        # For protected shares with password, we can't determine editor role
-        # So we allow editing if authenticated
-    elif share.visibility == models.ShareVisibility.PRIVATE:
-        # For private shares, require JWT token and check editor role
+    if share.visibility in (models.ShareVisibility.PROTECTED, models.ShareVisibility.PRIVATE):
+        # Require JWT token and check editor role for both PROTECTED and PRIVATE
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required",
+                detail="Authentication required (JWT token)",
             )
 
         # Validate JWT and get user
@@ -1268,7 +1282,7 @@ def update_share_content(
         # Public shares - anyone can view but editing requires authentication
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Public shares cannot be edited via web. Use protected or private visibility.",
+            detail="Public shares cannot be edited via web.",
         )
 
     # Update content
@@ -1613,6 +1627,8 @@ def serve_web_asset(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Share not found or not published",
         )
+
+    _ensure_share_content_access(db, request, share)
 
     # Read from MinIO
     client = _get_minio_client()

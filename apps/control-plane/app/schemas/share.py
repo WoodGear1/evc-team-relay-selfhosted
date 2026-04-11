@@ -20,6 +20,7 @@ class ShareCreate(ShareBase):
     web_slug: str | None = Field(default=None, min_length=1, max_length=255)
     web_noindex: bool = True
     web_sync_mode: str = "manual"
+    git_sync_mode: str = "manual"
 
     @field_validator("password")
     @classmethod
@@ -34,6 +35,13 @@ class ShareCreate(ShareBase):
     def validate_web_sync_mode(cls, value: str):
         if value not in ("manual", "auto"):
             raise ValueError("web_sync_mode must be 'manual' or 'auto'")
+        return value
+
+    @field_validator("git_sync_mode")
+    @classmethod
+    def validate_git_sync_mode(cls, value: str):
+        if value not in ("manual", "auto"):
+            raise ValueError("git_sync_mode must be 'manual' or 'auto'")
         return value
 
 
@@ -54,15 +62,26 @@ class ShareUpdate(BaseModel):
     web_slug: str | None = Field(default=None, min_length=1, max_length=255)
     web_noindex: bool | None = None
     web_sync_mode: str | None = None
+    git_sync_mode: str | None = None
     web_content: str | None = None  # Document content for web publishing
     web_folder_items: list[FolderItem] | None = None  # Folder contents for web publishing
     web_doc_id: str | None = None  # Y-sweet document ID for real-time sync
+    git_repo_url: str | None = None
+    git_branch: str | None = None
+    git_path: str | None = None
 
     @field_validator("web_sync_mode")
     @classmethod
     def validate_web_sync_mode(cls, value: str | None):
         if value is not None and value not in ("manual", "auto"):
             raise ValueError("web_sync_mode must be 'manual' or 'auto'")
+        return value
+
+    @field_validator("git_sync_mode")
+    @classmethod
+    def validate_git_sync_mode(cls, value: str | None):
+        if value is not None and value not in ("manual", "auto"):
+            raise ValueError("git_sync_mode must be 'manual' or 'auto'")
         return value
 
 
@@ -78,8 +97,12 @@ class ShareRead(BaseModel):
     web_slug: str | None
     web_noindex: bool
     web_sync_mode: str
+    git_sync_mode: str
     web_url: str | None = None  # Computed field, set by service
     web_doc_id: str | None = None  # Y-sweet document ID for real-time sync
+    git_repo_url: str | None = None
+    git_branch: str | None = None
+    git_path: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -121,6 +144,10 @@ class ShareListItem(BaseModel):
     web_slug: str | None
     web_noindex: bool
     web_sync_mode: str
+    git_sync_mode: str
     web_url: str | None = None  # Computed field, set by service
+    git_repo_url: str | None = None
+    git_branch: str | None = None
+    git_path: str | None = None
 
     model_config = {"from_attributes": True}
