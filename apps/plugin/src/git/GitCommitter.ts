@@ -195,16 +195,16 @@ export class GitCommitter {
 		let skippedFiles = 0;
 
 		for (const file of localFiles) {
+			let relPath = file.path.substring(localFolderPath.length);
+			if (relPath.startsWith("/")) relPath = relPath.substring(1);
+			const finalPath = basePath ? `${basePath}/${relPath}` : relPath;
+			localPathsSet.add(finalPath);
+
 			if (file.stat.size > this.MAX_FILE_SIZE) {
 				console.warn(`Git Sync: Skipping large file ${file.path} (${(file.stat.size / 1024 / 1024).toFixed(2)} MB)`);
 				skippedFiles++;
 				continue;
 			}
-
-			let relPath = file.path.substring(localFolderPath.length);
-			if (relPath.startsWith("/")) relPath = relPath.substring(1);
-			const finalPath = basePath ? `${basePath}/${relPath}` : relPath;
-			localPathsSet.add(finalPath);
 
 			const isText = ["md", "txt", "canvas", "json", "js", "css", "html", "yaml", "yml"].includes(file.extension);
 			const arrayBuffer = await this.app.vault.readBinary(file);
@@ -380,16 +380,16 @@ export class GitCommitter {
 		let skippedFiles = 0;
 
 		for (const file of localFiles) {
+			let relPath = file.path.substring(localFolderPath.length);
+			if (relPath.startsWith("/")) relPath = relPath.substring(1);
+			const finalPath = basePath ? `${basePath}/${relPath}` : relPath;
+			localPathsSet.add(finalPath);
+
 			if (file.stat.size > this.MAX_FILE_SIZE) {
 				console.warn(`Git Sync: Skipping large file ${file.path} (${(file.stat.size / 1024 / 1024).toFixed(2)} MB)`);
 				skippedFiles++;
 				continue;
 			}
-
-			let relPath = file.path.substring(localFolderPath.length);
-			if (relPath.startsWith("/")) relPath = relPath.substring(1);
-			const finalPath = basePath ? `${basePath}/${relPath}` : relPath;
-			localPathsSet.add(finalPath);
 			
 			const arrayBuffer = await this.app.vault.readBinary(file);
 			const localSha = await this.calculateGitSha(arrayBuffer);
