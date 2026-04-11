@@ -17,6 +17,8 @@ import {
 	type User,
 	type Invite,
 	type CreateInviteRequest,
+	type FolderItem,
+	type GitSyncStatus,
 } from "./RelayOnPremShareClient";
 import type { MultiServerAuthManager } from "./auth/MultiServerAuthManager";
 
@@ -533,5 +535,21 @@ export class RelayOnPremShareClientManager {
 		}
 
 		return client.syncFolderFileContent(slug, path, content);
+	}
+
+	/**
+	 * Get git sync status for a share
+	 */
+	async getGitSyncStatus(serverId: string, shareId: string): Promise<GitSyncStatus> {
+		const client = this.clients.get(serverId);
+		if (!client) {
+			throw new Error(`Server ${serverId} not found`);
+		}
+
+		if (!this.authManager.isLoggedInToServer(serverId)) {
+			throw new Error(`Not logged in to server ${serverId}`);
+		}
+
+		return client.getGitSyncStatus(shareId);
 	}
 }

@@ -7,13 +7,14 @@
 
 import { App, Modal, Notice, Setting, TFile, TFolder } from "obsidian";
 import type Live from "../main";
-import { RelayOnPremShareClient, type RelayOnPremShare, type ShareMember, type Invite, type FolderItem } from "../RelayOnPremShareClient";
+import { RelayOnPremShareClient, type RelayOnPremShare, type ShareMember, type Invite, type FolderItem, type GitSyncStatus } from "../RelayOnPremShareClient";
 import { RelayOnPremShareClientManager, type ShareWithServer } from "../RelayOnPremShareClientManager";
 import { FolderSuggestModal } from "./FolderSuggestModal";
 import { LinkManagementModal } from "./LinkManagementModal";
 import { getDefaultServer, type RelayOnPremServer } from "../RelayOnPremConfig";
 import { S3RN } from "../S3RN";
 import { choiceDialog, confirmDialog, promptDialog } from "./dialogs";
+import { GitCommitter } from "../git/GitCommitter";
 
 export class ShareManagementModal extends Modal {
 	private shares: ShareWithServer[] = [];
@@ -26,6 +27,16 @@ export class ShareManagementModal extends Modal {
 	private serverName?: string;
 	private webPublishEnabled = false;
 	private webPublishDomain: string | null = null;
+	private gitSyncEnabled = false;
+	private gitRepoUrl: string | null = null;
+	private gitSyncStatus: GitSyncStatus | null = null;
+	private gitCommitter: GitCommitter;
+	private isEditor = false;
+	private isPushing = false;
+	private editingGitRepoUrl = "";
+	private editingGitBranch = "";
+	private editingGitPath = "";
+	private commitMessage = "";
 
 	constructor(
 		app: App,
@@ -36,6 +47,7 @@ export class ShareManagementModal extends Modal {
 		super(app);
 		this.serverId = serverId;
 		this.serverName = serverName;
+		this.gitCommitter = new GitCommitter(plugin);
 
 		if (serverName) {
 			this.setTitle(`Shares — ${serverName}`);
@@ -269,16 +281,47 @@ export class ShareManagementModal extends Modal {
 				return [] as Invite[];
 			})();
 
-			const [serverInfo, members, invites] = await Promise.all([
+			const gitSyncStatusPromise = (async () => {
+				try {
+					if (this.plugin.shareClientManager) {
+						return await this.plugin.shareClientManager.getGitSyncStatus(canonicalShare.serverId, canonicalShare.id);
+					} else if (this.plugin.shareClient) {
+						return await this.plugin.shareClient.getGitSyncStatus(canonicalShare.id);
+					}
+				} catch {
+					// optional
+				}
+				return null;
+			})();
+
+			const [serverInfo, members, invites, gitSyncStatus] = await Promise.all([
 				serverInfoPromise,
 				membersPromise,
 				invitesPromise,
+				gitSyncStatusPromise,
 			]);
 
 			this.webPublishEnabled = serverInfo?.features?.web_publish_enabled ?? false;
 			this.webPublishDomain = serverInfo?.features?.web_publish_domain ?? null;
+			this.gitRepoUrl = serverInfo?.git_repo_url || serverInfo?.features?.git_repo_url || null;
+			this.gitSyncEnabled = Boolean(serverInfo?.git_sync_enabled || serverInfo?.features?.git_sync_enabled || this.gitRepoUrl);
+			this.gitSyncStatus = gitSyncStatus;
 			this.members = members;
 			this.invites = invites;
+			
+			const multiServerAuth2 = this.plugin.loginManager.getMultiServerAuthManager();
+			const currentUser = multiServerAuth2?.getUserForServer(canonicalShare.serverId) || this.plugin.loginManager.getAuthProvider()?.getCurrentUser();
+			if (currentUser) {
+				const me = members.find(m => m.user_id === currentUser.id);
+				this.isEditor = this.isOwner || (me?.role === "editor");
+			} else {
+				this.isEditor = false;
+			}
+
+			this.editingGitRepoUrl = canonicalShare.git_repo_url || "";
+			this.editingGitBranch = canonicalShare.git_branch || "";
+			this.editingGitPath = canonicalShare.git_path || "";
+
 			this.updateShareInList(canonicalShare);
 
 			this.renderContent();
@@ -489,6 +532,11 @@ export class ShareManagementModal extends Modal {
 			this.renderWebPublishingSection();
 		}
 
+		// Git Versioning section
+		if (this.isOwner || this.isEditor || this.gitSyncEnabled) {
+			this.renderGitVersioningSection();
+		}
+
 		// Actions - only for owners
 		if (this.isOwner) {
 			this.renderActionsSection();
@@ -564,6 +612,235 @@ export class ShareManagementModal extends Modal {
 							modal.open();
 						});
 				});
+		}
+	}
+
+	/**
+	 * Render Git Versioning section
+	 */
+	private renderGitVersioningSection() {
+		if (!this.selectedShare) return;
+
+		const { contentEl } = this;
+		contentEl.createEl("h4", { text: "Git Versioning" });
+
+		const statusDesc = document.createDocumentFragment();
+		if (this.gitSyncStatus?.last_push_at) {
+			statusDesc.append(`Last push: ${new Date(this.gitSyncStatus.last_push_at).toLocaleString()}`);
+			if (this.gitSyncStatus.total_commits !== undefined) {
+				statusDesc.append(` • ${this.gitSyncStatus.total_commits} commits`);
+			}
+		} else if (this.gitSyncStatus?.enabled === false) {
+			statusDesc.append("Git sync is disabled on the server");
+		} else {
+			statusDesc.append("Status unavailable");
+		}
+
+		if (this.gitSyncStatus?.last_error) {
+			statusDesc.append(document.createElement("br"));
+			statusDesc.append(`Last error: ${this.gitSyncStatus.last_error}`);
+		}
+
+		new Setting(contentEl)
+			.setName("Status")
+			.setDesc(statusDesc)
+			.addButton((button) => {
+				button
+					.setButtonText("View Repository")
+					.setCta()
+					.setDisabled(!this.gitRepoUrl && !this.selectedShare!.git_repo_url)
+					.onClick(() => {
+						const repoUrl = this.selectedShare!.git_repo_url || this.gitRepoUrl;
+						if (!repoUrl) {
+							new Notice("Git repository URL is not configured for this server or share");
+							return;
+						}
+						const route = this.selectedShare!.kind === "folder" ? "tree" : "blob";
+						const encodedPath = this.selectedShare!.path.split("/").filter(Boolean).map(s => encodeURIComponent(s)).join("/");
+						window.open(`${repoUrl.replace(/\/+$/, "")}/${route}/main/${encodedPath}`, "_blank", "noopener,noreferrer");
+					});
+			});
+
+		if (this.isOwner) {
+			let repoInput: HTMLInputElement;
+			new Setting(contentEl)
+				.setName("Custom Git Repository")
+				.setDesc("Override the server's default repository URL for this share.")
+				.addText((text) => {
+					repoInput = text.inputEl;
+					text.setPlaceholder("https://github.com/org/repo.git");
+					text.setValue(this.editingGitRepoUrl);
+					text.onChange(v => this.editingGitRepoUrl = v);
+				});
+
+			let branchInput: HTMLInputElement;
+			new Setting(contentEl)
+				.setName("Git Branch")
+				.addText((text) => {
+					branchInput = text.inputEl;
+					text.setPlaceholder("main");
+					text.setValue(this.editingGitBranch);
+					text.onChange(v => this.editingGitBranch = v);
+				});
+
+			let pathInput: HTMLInputElement;
+			new Setting(contentEl)
+				.setName("Git Folder Path")
+				.setDesc("Path inside the repository where this share will be synced.")
+				.addText((text) => {
+					pathInput = text.inputEl;
+					text.setPlaceholder("docs/my-folder");
+					text.setValue(this.editingGitPath);
+					text.onChange(v => this.editingGitPath = v);
+				});
+
+			let commitInput: HTMLInputElement;
+			new Setting(contentEl)
+				.setName("Commit Message")
+				.setDesc("Optional. Defaults to 'Update from Obsidian'.")
+				.addText((text) => {
+					commitInput = text.inputEl;
+					text.setPlaceholder("Update from Obsidian");
+					text.setValue(this.commitMessage);
+					text.onChange(v => this.commitMessage = v);
+				});
+
+			const isLocalConnected = this.plugin.sharedFolders.find(sf => sf.guid === this.selectedShare!.id) !== undefined;
+
+			new Setting(contentEl)
+				.setName("Git Actions")
+				.addButton((button) => {
+					button
+						.setButtonText("Save Settings")
+						.onClick(async () => {
+							const newRepo = this.editingGitRepoUrl.trim() || null;
+							const newBranch = this.editingGitBranch.trim() || null;
+							const newPath = this.editingGitPath.trim() || null;
+							
+							if (newRepo === this.selectedShare!.git_repo_url && newBranch === this.selectedShare!.git_branch && newPath === this.selectedShare!.git_path) return;
+							
+							try {
+								let updated;
+								if (this.plugin.shareClientManager) {
+									updated = await this.plugin.shareClientManager.updateShare(this.selectedShare!.serverId, this.selectedShare!.id, {
+										git_repo_url: newRepo,
+										git_branch: newBranch,
+										git_path: newPath
+									});
+								} else if (this.plugin.shareClient) {
+									updated = await this.plugin.shareClient.updateShare(this.selectedShare!.id, {
+										git_repo_url: newRepo,
+										git_branch: newBranch,
+										git_path: newPath
+									});
+								}
+								if (updated) {
+									await this.refreshSelectedShare(updated);
+								}
+								new Notice("Git settings updated");
+							} catch (e: unknown) {
+								new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+							}
+						});
+				})
+				.addButton((button) => {
+					button
+						.setButtonText(this.isPushing ? "Pushing..." : "Commit & Push")
+						.setCta()
+						.setDisabled(!isLocalConnected || (!this.gitRepoUrl && !this.selectedShare!.git_repo_url && !this.editingGitRepoUrl) || this.isPushing)
+						.onClick(async () => {
+							await this.pushToGit(isLocalConnected);
+							button.setButtonText(this.isPushing ? "Pushing..." : "Commit & Push");
+							button.setDisabled(!isLocalConnected || (!this.gitRepoUrl && !this.selectedShare!.git_repo_url && !this.editingGitRepoUrl) || this.isPushing);
+						});
+				});
+		} else if (this.isEditor) {
+			let branchInput: HTMLInputElement;
+			new Setting(contentEl)
+				.setName("Target Git Branch")
+				.setDesc("Branch to push changes to.")
+				.addText((text) => {
+					branchInput = text.inputEl;
+					text.setPlaceholder(this.selectedShare!.git_branch || "main");
+					text.setValue(this.editingGitBranch);
+					text.onChange(v => this.editingGitBranch = v);
+				});
+
+			let commitInput: HTMLInputElement;
+			new Setting(contentEl)
+				.setName("Commit Message")
+				.setDesc("Optional. Defaults to 'Update from Obsidian'.")
+				.addText((text) => {
+					commitInput = text.inputEl;
+					text.setPlaceholder("Update from Obsidian");
+					text.setValue(this.commitMessage);
+					text.onChange(v => this.commitMessage = v);
+				});
+
+			const isLocalConnected = this.plugin.sharedFolders.find(sf => sf.guid === this.selectedShare!.id) !== undefined;
+
+			new Setting(contentEl)
+				.setName("Git Actions")
+				.addButton((button) => {
+					button
+						.setButtonText(this.isPushing ? "Pushing..." : "Commit & Push")
+						.setCta()
+						.setDisabled(!isLocalConnected || (!this.gitRepoUrl && !this.selectedShare!.git_repo_url) || this.isPushing)
+						.onClick(async () => {
+							await this.pushToGit(isLocalConnected);
+							button.setButtonText(this.isPushing ? "Pushing..." : "Commit & Push");
+							button.setDisabled(!isLocalConnected || (!this.gitRepoUrl && !this.selectedShare!.git_repo_url) || this.isPushing);
+						});
+				});
+		}
+
+		if ((this.selectedShare!.git_repo_url || this.gitRepoUrl) && !this.isOwner) {
+			new Setting(contentEl)
+				.setName("Repository")
+				.setDesc(this.selectedShare!.git_repo_url || this.gitRepoUrl || "")
+				.addButton((button) => {
+					button
+						.setButtonText("Copy")
+						.onClick(() => {
+							navigator.clipboard.writeText(this.selectedShare!.git_repo_url || this.gitRepoUrl || "");
+							new Notice("Copied!");
+						});
+				})
+				.addButton((button) => {
+					button
+						.setButtonText("Open")
+						.onClick(() => {
+							const repoUrl = this.selectedShare!.git_repo_url || this.gitRepoUrl;
+							if (!repoUrl) return;
+							const route = this.selectedShare!.kind === "folder" ? "tree" : "blob";
+							const encodedPath = this.selectedShare!.path.split("/").filter(Boolean).map(s => encodeURIComponent(s)).join("/");
+							window.open(`${repoUrl.replace(/\/+$/, "")}/${route}/main/${encodedPath}`, "_blank", "noopener,noreferrer");
+						});
+				});
+		}
+	}
+
+	private async pushToGit(isLocalConnected: boolean) {
+		if (!this.selectedShare) return;
+		if (!isLocalConnected) {
+			new Notice("Please connect a local folder first to sync from.");
+			return;
+		}
+		
+		const localFolder = this.plugin.sharedFolders.find(sf => sf.guid === this.selectedShare!.id);
+		if (!localFolder) return;
+		
+		this.isPushing = true;
+		this.renderContent(); // Re-render to show "Pushing..." state
+		
+		try {
+			if (this.gitCommitter) {
+				await this.gitCommitter.pushToGit(this.selectedShare, localFolder.path, this.commitMessage, this.editingGitBranch.trim());
+				this.commitMessage = "";
+			}
+		} finally {
+			this.isPushing = false;
+			this.renderContent(); // Re-render to remove "Pushing..." state
 		}
 	}
 

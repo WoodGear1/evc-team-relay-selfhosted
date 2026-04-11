@@ -35,6 +35,7 @@
 	let members: ShareMember[] = [];
 	let invites: Invite[] = [];
 	let isOwner = false;
+	let isEditor = false;
 	let loading = true;
 	let webPublishEnabled = false;
 	let webPublishDomain: string | null = null;
@@ -135,16 +136,16 @@
 			const canonicalShare = await fetchCanonicalShare(currentShare);
 			applyCurrentShare(canonicalShare, false);
 
-			// Determine ownership
+			// Determine ownership and role
 			const multiServerAuth = plugin.loginManager.getMultiServerAuthManager();
+			let currentUser;
 			if (multiServerAuth) {
-				const currentUser = multiServerAuth.getUserForServer(canonicalShare.serverId);
-				isOwner = currentUser?.id === canonicalShare.owner_user_id;
+				currentUser = multiServerAuth.getUserForServer(canonicalShare.serverId);
 			} else {
 				const authProvider = plugin.loginManager.getAuthProvider();
-				const currentUser = authProvider?.getCurrentUser();
-				isOwner = currentUser?.id === canonicalShare.owner_user_id;
+				currentUser = authProvider?.getCurrentUser();
 			}
+			isOwner = currentUser?.id === canonicalShare.owner_user_id;
 
 			// Load all data in parallel
 			const [serverInfo, membersResult, invitesResult] = await Promise.all([
@@ -152,6 +153,13 @@
 				loadMembers(),
 				isOwner ? loadInvites() : Promise.resolve([]),
 			]);
+
+			if (currentUser) {
+				const me = membersResult.find(m => m.user_id === currentUser.id);
+				isEditor = isOwner || (me?.role === "editor");
+			} else {
+				isEditor = false;
+			}
 
 			webPublishEnabled = serverInfo?.features?.web_publish_enabled ?? false;
 			webPublishDomain = serverInfo?.features?.web_publish_domain ?? null;
@@ -1031,7 +1039,7 @@
 			</div>
 		{/if}
 
-		{#if isOwner || gitSyncEnabled}
+		{#if isOwner || isEditor || gitSyncEnabled}
 			<div class="evc-section">
 				<div class="evc-section-title">Git Versioning</div>
 
@@ -1103,6 +1111,35 @@
 						<div class="evc-setting-actions">
 							<button class="evc-small-btn" on:click={saveGitSettings}>Save Settings</button>
 							<button class="mod-cta evc-small-btn" on:click={pushToGit} disabled={!isConnectedLocally || (!gitRepoUrl && !currentShare.git_repo_url && !editingGitRepoUrl) || isPushing}>
+								{isPushing ? "Pushing..." : "Commit & Push"}
+							</button>
+						</div>
+					</div>
+				{:else if isEditor}
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Target Git Branch</span>
+							<span class="evc-setting-desc">Branch to push changes to.</span>
+						</div>
+						<div class="evc-slug-edit">
+							<input type="text" bind:value={editingGitBranch} placeholder={currentShare.git_branch || "main"} />
+						</div>
+					</div>
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Commit Message</span>
+							<span class="evc-setting-desc">Optional. Defaults to "Update from Obsidian".</span>
+						</div>
+						<div class="evc-slug-edit">
+							<input type="text" bind:value={commitMessage} placeholder="Update from Obsidian" />
+						</div>
+					</div>
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Git Actions</span>
+						</div>
+						<div class="evc-setting-actions">
+							<button class="mod-cta evc-small-btn" on:click={pushToGit} disabled={!isConnectedLocally || (!gitRepoUrl && !currentShare.git_repo_url) || isPushing}>
 								{isPushing ? "Pushing..." : "Commit & Push"}
 							</button>
 						</div>
