@@ -33,11 +33,14 @@ async def validation_exception_handler(
     # Convert errors to JSON-serializable format
     errors = []
     for error in exc.errors():
+        input_val = error.get("input")
+        if isinstance(input_val, bytes):
+            input_val = input_val.decode("utf-8", errors="replace")
         error_dict = {
             "type": error["type"],
             "loc": error["loc"],
             "msg": error["msg"],
-            "input": error.get("input"),
+            "input": input_val,
         }
         # Convert ctx values to strings if they exist
         if "ctx" in error:

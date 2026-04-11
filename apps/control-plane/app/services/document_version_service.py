@@ -153,8 +153,8 @@ def build_diff_preview(
     
     # We must format unified_diff properly
     diff = list(difflib.unified_diff(
-        base_content.splitlines(),
-        version_content.splitlines(),
+        base_content.split("\n"),
+        version_content.split("\n"),
         fromfile="previous",
         tofile="current",
         lineterm="",
@@ -166,11 +166,11 @@ def build_diff_preview(
     
     # If no diff, and it's the first commit, show everything as added
     if not base_version and version_content:
-        diff = [f"+{line}" for line in version_content.splitlines()]
+        diff = [f"+{line}" for line in version_content.split("\n")]
         diff = ["--- previous", "+++ current", f"@@ -0,0 +1,{len(diff)} @@"] + diff
 
     # If it's a single line that changed to another single line without newlines,
-    # difflib correctly handles it as long as we splitlines().
+    # difflib correctly handles it as long as we split("\n").
     
     diff_text = "\n".join(diff)
     
