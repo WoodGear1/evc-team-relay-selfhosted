@@ -121,7 +121,6 @@ def get_previous_version(
     )
     return db.execute(stmt).scalar_one_or_none()
 
-
 def _validate_diff_base_version(
     version: models.DocumentVersion,
     base_version: models.DocumentVersion,
@@ -135,24 +134,44 @@ def _validate_diff_base_version(
             detail="Base version must belong to the same document",
         )
 
-
 def build_diff_preview(
     db: Session,
     version: models.DocumentVersion,
     base_version_id: uuid.UUID | None = None,
 ) -> tuple[models.DocumentVersion | None, str]:
-    base_version = get_version(db, base_version_id) if base_version_id else get_previous_version(db, version)
+    base_version = None
+    if base_version_id:
+        base_version = get_version(db, base_version_id)
+    else:
+        base_version = get_previous_version(db, version)
+        
     if base_version:
         _validate_diff_base_version(version, base_version)
+        
     base_content = base_version.content if base_version else ""
-    diff = difflib.unified_diff(
+    version_content = version.content if version else ""
+    
+    # We must format unified_diff properly
+    diff = list(difflib.unified_diff(
         base_content.splitlines(),
-        version.content.splitlines(),
-        fromfile=base_version.document_path if base_version else "empty",
-        tofile=version.document_path,
+        version_content.splitlines(),
+        fromfile="previous",
+        tofile="current",
         lineterm="",
-    )
-    return base_version, "\n".join(diff)
+    ))
+    
+    # If no diff, and it's the first commit, show everything as added
+    if not base_version and version_content:
+        diff = [f"+{line}" for line in version_content.splitlines()]
+        diff = ["--- previous", "+++ current", f"@@ -0,0 +1,{len(diff)} @@"] + diff
+
+    diff_text = "\n".join(diff)
+    
+    # If there is a diff but the result string is empty because there are no newlines,
+    # it means difflib didn't find any differences. However, the file could just be a single line.
+    # difflib works correctly with single lines too.
+    
+    return base_version, diff_text
 
 
 def restore_version(
