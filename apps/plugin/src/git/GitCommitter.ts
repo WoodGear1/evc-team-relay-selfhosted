@@ -116,7 +116,12 @@ export class GitCommitter {
 		}
 	}
 
+	private normalizePath(p: string): string {
+		return p.replace(/^\/+/, "").replace(/\/+$/, "");
+	}
+
 	private async pushToGithub(repo: { owner: string; repo: string }, branch: string, basePath: string, localFolderPath: string, token: string, commitMessage?: string) {
+		basePath = this.normalizePath(basePath || "");
 		const baseUrl = `https://api.github.com/repos/${repo.owner}/${repo.repo}`;
 		const headers = {
 			"Authorization": `Bearer ${token}`,
@@ -326,6 +331,7 @@ export class GitCommitter {
 	}
 
 	private async pushToGitlab(repo: { owner: string; repo: string }, branch: string, basePath: string, localFolderPath: string, token: string, commitMessage?: string) {
+		basePath = this.normalizePath(basePath || "");
 		const encodedRepo = encodeURIComponent(`${repo.owner}/${repo.repo}`);
 		const baseUrl = `https://gitlab.com/api/v4/projects/${encodedRepo}`;
 		const headers = {
@@ -336,7 +342,7 @@ export class GitCommitter {
 		// 0. Ensure branch exists
 		try {
 			await requestUrl({
-				url: `${baseUrl}/repository/branches/${branch}`,
+				url: `${baseUrl}/repository/branches/${encodeURIComponent(branch)}`,
 				method: "GET",
 				headers
 			});
@@ -382,11 +388,20 @@ export class GitCommitter {
 			let page = 1;
 			while (true) {
 				const treeRes = await requestUrl({
-					url: `${baseUrl}/repository/tree?ref=${branch}&recursive=true&per_page=100&page=${page}`,
+					url: `${baseUrl}/repository/tree?ref=${encodeURIComponent(branch)}&recursive=true&per_page=100&page=${page}`,
 					method: "GET",
-					headers
+					headers,
+					throw: false
 				});
 				
+				if (treeRes.status >= 400) {
+					if (treeRes.status === 404) {
+						console.warn("GitLab fetch tree returned 404, assuming empty branch or delay...");
+						break;
+					}
+					throw new Error(`GitLab tree fetch failed (${treeRes.status}): ${treeRes.text}`);
+				}
+
 				const items = treeRes.json;
 				if (!items || items.length === 0) break;
 
@@ -400,7 +415,7 @@ export class GitCommitter {
 				page++;
 			}
 		} catch (e: any) {
-			console.warn("GitLab fetch tree error (might be empty branch):", e);
+			throw new Error(`GitLab fetch tree error: ${e.message}`);
 		}
 
 		// 2. Gather local files
@@ -474,7 +489,7 @@ export class GitCommitter {
 		for (let i = 0; i < actions.length; i += batchSize) {
 			const batchActions = actions.slice(i, i + batchSize);
 			
-			await requestUrl({
+			const commitRes = await requestUrl({
 				url: `${baseUrl}/repository/commits`,
 				method: "POST",
 				headers,
@@ -482,8 +497,20 @@ export class GitCommitter {
 					branch: branch,
 					commit_message: `${finalCommitMessage} (${batchActions.length} changes${actions.length > batchSize ? `, batch ${Math.floor(i/batchSize) + 1}` : ''})`,
 					actions: batchActions
-				})
+				}),
+				throw: false
 			});
+
+			if (commitRes.status >= 400) {
+				let errMsg = commitRes.text;
+				try {
+					const json = commitRes.json;
+					if (json && json.message) errMsg = typeof json.message === "string" ? json.message : JSON.stringify(json.message);
+				} catch (e) {
+					// Ignore
+				}
+				throw new Error(`GitLab commit failed (status ${commitRes.status}): ${errMsg}`);
+			}
 		}
 		
 		new Notice(`Git Sync (GitLab): Successfully pushed ${totalChanges} changes!`);
