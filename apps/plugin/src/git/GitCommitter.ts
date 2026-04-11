@@ -83,6 +83,15 @@ export class GitCommitter {
 			return;
 		}
 
+		if (share.git_repo_url.includes("github.com") && provider === "gitlab") {
+			new Notice("Git Sync Error: The repository URL is for GitHub, but your configured Git Provider is GitLab. Please change it in the Relay settings.");
+			return;
+		}
+		if (share.git_repo_url.includes("gitlab.com") && provider === "github") {
+			new Notice("Git Sync Error: The repository URL is for GitLab, but your configured Git Provider is GitHub. Please change it in the Relay settings.");
+			return;
+		}
+
 		const repoInfo = this.parseRepoUrl(share.git_repo_url);
 		if (!repoInfo) {
 			new Notice("Git Sync: Invalid repository URL. Please use format owner/repo or full URL.");
@@ -127,12 +136,19 @@ export class GitCommitter {
 		} catch (e: any) {
 			if (e.status === 404 || (e.message && e.message.includes("404"))) {
 				new Notice(`Git Sync: Branch '${branch}' not found. Attempting to create it...`);
-				// Get repository default branch
-				const repoRes = await requestUrl({
-					url: baseUrl,
-					method: "GET",
-					headers
-				});
+				let repoRes;
+				try {
+					repoRes = await requestUrl({
+						url: baseUrl,
+						method: "GET",
+						headers
+					});
+				} catch (repoErr: any) {
+					if (repoErr.status === 404 || (repoErr.message && repoErr.message.includes("404"))) {
+						throw new Error(`Repository not found or token lacks access. Please check the URL and your token permissions.`);
+					}
+					throw repoErr;
+				}
 				const defaultBranch = repoRes.json.default_branch;
 				
 				// Get default branch SHA
@@ -324,11 +340,19 @@ export class GitCommitter {
 			if (e.status === 404 || (e.message && e.message.includes("404"))) {
 				new Notice(`Git Sync: Branch '${branch}' not found. Attempting to create it...`);
 				// Get repo info to find default branch
-				const repoRes = await requestUrl({
-					url: baseUrl,
-					method: "GET",
-					headers
-				});
+				let repoRes;
+				try {
+					repoRes = await requestUrl({
+						url: baseUrl,
+						method: "GET",
+						headers
+					});
+				} catch (repoErr: any) {
+					if (repoErr.status === 404 || (repoErr.message && repoErr.message.includes("404"))) {
+						throw new Error(`GitLab repository not found. Ensure the URL is correct, the project is not empty, and the token has 'api' scope.`);
+					}
+					throw repoErr;
+				}
 				const defaultBranch = repoRes.json.default_branch;
 				
 				await requestUrl({
