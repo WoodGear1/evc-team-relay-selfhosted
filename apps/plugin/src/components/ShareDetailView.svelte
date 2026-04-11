@@ -236,14 +236,15 @@
 	}
 
 	function openGitRepo() {
-		if (!gitRepoUrl) {
-			new Notice("Git repository URL is not configured for this server");
+		const repoUrl = currentShare.git_repo_url || gitRepoUrl;
+		if (!repoUrl) {
+			new Notice("Git repository URL is not configured for this server or share");
 			return;
 		}
 
 		const route = currentShare.kind === "folder" ? "tree" : "blob";
 		window.open(
-			`${gitRepoUrl.replace(/\/+$/, "")}/${route}/main/${encodeGitPath(currentShare.path)}`,
+			`${repoUrl.replace(/\/+$/, "")}/${route}/main/${encodeGitPath(currentShare.path)}`,
 			"_blank",
 			"noopener,noreferrer",
 		);
@@ -1030,7 +1031,7 @@
 			</div>
 		{/if}
 
-		{#if gitSyncEnabled}
+		{#if isOwner || gitSyncEnabled}
 			<div class="evc-section">
 				<div class="evc-section-title">Git Versioning</div>
 
@@ -1053,7 +1054,7 @@
 							<span class="evc-setting-desc">Last error: {gitSyncStatus.last_error}</span>
 						{/if}
 					</div>
-					<button class="mod-cta evc-small-btn" on:click={openGitRepo} disabled={!gitRepoUrl}>
+					<button class="mod-cta evc-small-btn" on:click={openGitRepo} disabled={!gitRepoUrl && !currentShare.git_repo_url}>
 						View Repository
 					</button>
 				</div>
@@ -1101,21 +1102,21 @@
 						</div>
 						<div class="evc-setting-actions">
 							<button class="evc-small-btn" on:click={saveGitSettings}>Save Settings</button>
-							<button class="mod-cta evc-small-btn" on:click={pushToGit} disabled={!isConnectedLocally || !gitRepoUrl || isPushing}>
+							<button class="mod-cta evc-small-btn" on:click={pushToGit} disabled={!isConnectedLocally || (!gitRepoUrl && !currentShare.git_repo_url && !editingGitRepoUrl) || isPushing}>
 								{isPushing ? "Pushing..." : "Commit & Push"}
 							</button>
 						</div>
 					</div>
 				{/if}
 
-				{#if gitRepoUrl && !isOwner}
+				{#if (currentShare.git_repo_url || gitRepoUrl) && !isOwner}
 					<div class="evc-setting-row">
 						<div class="evc-setting-info">
 							<span>Repository</span>
-							<span class="evc-setting-desc">{gitRepoUrl}</span>
+							<span class="evc-setting-desc">{currentShare.git_repo_url || gitRepoUrl}</span>
 						</div>
 						<div class="evc-setting-actions">
-							<button class="evc-small-btn" on:click={() => navigator.clipboard.writeText(gitRepoUrl || "")}>Copy</button>
+							<button class="evc-small-btn" on:click={() => navigator.clipboard.writeText(currentShare.git_repo_url || gitRepoUrl || "")}>Copy</button>
 							<button class="evc-small-btn" on:click={openGitRepo}>Open</button>
 						</div>
 					</div>

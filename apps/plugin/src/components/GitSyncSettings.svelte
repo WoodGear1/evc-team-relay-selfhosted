@@ -7,6 +7,40 @@
 	let provider: "github" | "gitlab" | "none" = plugin.settings.get().gitProvider || "none";
 	let token = plugin.settings.get().gitToken || "";
 	let isSaving = false;
+	let isTesting = false;
+
+	async function testToken() {
+		if (!token) {
+			new Notice("Please enter a token first");
+			return;
+		}
+		isTesting = true;
+		try {
+			let res;
+			if (provider === "github") {
+				res = await fetch("https://api.github.com/user", {
+					headers: { Authorization: `Bearer ${token}` }
+				});
+			} else if (provider === "gitlab") {
+				res = await fetch("https://gitlab.com/api/v4/user", {
+					headers: { Authorization: `Bearer ${token}` }
+				});
+			}
+			
+			if (res && res.ok) {
+				const data = await res.json();
+				const name = data.login || data.username || data.name || "user";
+				new Notice(`Success: Connected as ${name}`);
+			} else {
+				new Notice(`Test Failed: HTTP ${res?.status}`);
+			}
+		} catch (error) {
+			new Notice("Connection failed");
+			console.error(error);
+		} finally {
+			isTesting = false;
+		}
+	}
 
 	async function saveSettings() {
 		isSaving = true;
@@ -64,6 +98,11 @@
 		{/if}
 
 		<div class="relay-server-form-actions">
+			{#if provider !== "none"}
+				<button class="evc-small-btn" on:click={testToken} disabled={isTesting || !token}>
+					{isTesting ? "Testing..." : "Test Token"}
+				</button>
+			{/if}
 			<button class="mod-cta" on:click={saveSettings} disabled={isSaving}>
 				{isSaving ? "Saving..." : "Save Settings"}
 			</button>
