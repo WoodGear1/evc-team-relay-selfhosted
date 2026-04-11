@@ -181,7 +181,6 @@ export default class Live extends Plugin {
 	public shareClient?: RelayOnPremShareClient;
 	public shareClientManager?: RelayOnPremShareClientManager;
 	public webSyncManager?: import("./WebSyncManager").WebSyncManager;
-	public gitSyncManager?: import("./GitSyncManager").GitSyncManager;
 	debug!: (...args: unknown[]) => void;
 	log!: (...args: unknown[]) => void;
 	warn!: (...args: unknown[]) => void;
@@ -889,10 +888,6 @@ export default class Live extends Plugin {
 				this.vault,
 				this.shareClientManager
 			);
-			
-			const { GitCommitter } = await import("./git/GitCommitter");
-			const { GitSyncManager } = await import("./GitSyncManager");
-			this.gitSyncManager = new GitSyncManager(new GitCommitter(this));
 		}
 
 		// Add status bar item for Relay On-Prem (v1.8.2)
@@ -1411,17 +1406,6 @@ export default class Live extends Plugin {
 							log(`Registered auto-sync for ${share.kind} ${share.path} on server ${share.serverId}`);
 						}
 					}
-
-					// Register git auto-sync shares
-					if (share.git_sync_mode === "auto") {
-						if (this.gitSyncManager) {
-							this.gitSyncManager.registerGitAutoSync(
-								share,
-								share.path
-							);
-							log(`Registered git auto-sync for ${share.kind} ${share.path} on server ${share.serverId}`);
-						}
-					}
 				}
 			} else if (this.shareClient) {
 				// Single-server mode (legacy)
@@ -1492,17 +1476,6 @@ export default class Live extends Plugin {
 								share.web_slug ?? undefined
 							);
 							log(`Registered auto-sync for ${share.kind} ${share.path}`);
-						}
-					}
-
-					// Register git auto-sync shares
-					if (share.git_sync_mode === "auto") {
-						if (this.gitSyncManager) {
-							this.gitSyncManager.registerGitAutoSync(
-								{ ...share, serverId: defaultServerId, serverName: "Default Server" },
-								share.path
-							);
-							log(`Registered git auto-sync for ${share.kind} ${share.path}`);
 						}
 					}
 				}
@@ -2974,9 +2947,6 @@ export default class Live extends Plugin {
 				if (this.webSyncManager && tfile instanceof TFile) {
 					void this.webSyncManager.onFileCreated(tfile);
 				}
-				if (this.gitSyncManager && (tfile instanceof TFile || tfile instanceof TFolder)) {
-					void this.gitSyncManager.onFileCreated(tfile);
-				}
 				if (tfile instanceof TFile) {
 					void this.attachmentManager.handleFileCreated(tfile);
 					void this.attachmentManager.captureInitialReferences(tfile);
@@ -3008,9 +2978,6 @@ export default class Live extends Plugin {
 				}
 				// Update web_folder_items for auto-sync folder shares
 				void this.webSyncManager?.onFileDeleted(file.path);
-				if (file instanceof TFile || file instanceof TFolder) {
-					void this.gitSyncManager?.onFileDeleted(file);
-				}
 				if (file instanceof TFile && file.extension === "md") {
 					this.attachmentManager.handleNoteDeleted(file.path);
 				}
@@ -3093,10 +3060,6 @@ export default class Live extends Plugin {
 				// Handle auto-sync to web (v1.8.1)
 				if (this.webSyncManager && tfile instanceof TFile) {
 					void this.webSyncManager.onFileModified(tfile);
-				}
-				// Handle auto-sync to git
-				if (this.gitSyncManager && (tfile instanceof TFile || tfile instanceof TFolder)) {
-					void this.gitSyncManager.onFileModified(tfile);
 				}
 				if (tfile instanceof TFile) {
 					this.queueDocumentVersionSnapshot(tfile);
@@ -3388,11 +3351,6 @@ export default class Live extends Plugin {
 		if (this.webSyncManager) {
 			this.webSyncManager.destroy();
 			this.webSyncManager = undefined;
-		}
-
-		if (this.gitSyncManager) {
-			this.gitSyncManager.destroy();
-			this.gitSyncManager = undefined;
 		}
 
 		this.hashStore.destroy();

@@ -6,6 +6,8 @@ import type { ShareWithServer } from "../RelayOnPremShareClientManager";
 export class GitCommitter {
 	private plugin: Live;
 	private app: App;
+	private isPushing = false;
+	private readonly MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB
 
 	constructor(plugin: Live) {
 		this.plugin = plugin;
@@ -55,7 +57,12 @@ export class GitCommitter {
 		return window.btoa(binary);
 	}
 
-	async pushToGit(share: ShareWithServer, localFolderPath: string) {
+	async pushToGit(share: ShareWithServer, localFolderPath: string, commitMessage?: string, customBranch?: string) {
+		if (this.isPushing) {
+			new Notice("Git Sync: A push operation is already in progress. Please wait.");
+			return;
+		}
+
 		const settings = this.plugin.settings.get();
 		const provider = settings.gitProvider as "github" | "gitlab" | "none" | undefined;
 		const token = settings.gitToken;
@@ -68,7 +75,10 @@ export class GitCommitter {
 			new Notice(`Git Sync: Please set your ${provider} token in Global Settings.`);
 			return;
 		}
-		if (!share.git_repo_url || !share.git_branch) {
+		
+		const targetBranch = customBranch || share.git_branch;
+		
+		if (!share.git_repo_url || !targetBranch) {
 			new Notice("Git Sync: Repository URL and Branch must be configured for this share.");
 			return;
 		}
@@ -79,21 +89,24 @@ export class GitCommitter {
 			return;
 		}
 
-		new Notice(`Git Sync (${provider}): Preparing to push...`);
+		new Notice(`Git Sync (${provider}): Preparing to push to branch '${targetBranch}'...`);
+		this.isPushing = true;
 
 		try {
 			if (provider === "github") {
-				await this.pushToGithub(repoInfo, share.git_branch, share.git_path || "", localFolderPath, token);
+				await this.pushToGithub(repoInfo, targetBranch, share.git_path || "", localFolderPath, token, commitMessage);
 			} else if (provider === "gitlab") {
-				await this.pushToGitlab(repoInfo, share.git_branch, share.git_path || "", localFolderPath, token);
+				await this.pushToGitlab(repoInfo, targetBranch, share.git_path || "", localFolderPath, token, commitMessage);
 			}
 		} catch (error) {
 			console.error("Git Sync Error:", error);
 			new Notice(`Git Sync failed: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			this.isPushing = false;
 		}
 	}
 
-	private async pushToGithub(repo: { owner: string; repo: string }, branch: string, basePath: string, localFolderPath: string, token: string) {
+	private async pushToGithub(repo: { owner: string; repo: string }, branch: string, basePath: string, localFolderPath: string, token: string, commitMessage?: string) {
 		const baseUrl = `https://api.github.com/repos/${repo.owner}/${repo.repo}`;
 		const headers = {
 			"Authorization": `Bearer ${token}`,
@@ -102,18 +115,48 @@ export class GitCommitter {
 			"Content-Type": "application/json"
 		};
 
-		// 1. Get latest commit SHA
-		let refRes;
+		// 1. Get latest commit SHA (or create branch if missing)
+		let latestCommitSha;
 		try {
-			refRes = await requestUrl({
+			const refRes = await requestUrl({
 				url: `${baseUrl}/git/refs/heads/${branch}`,
 				method: "GET",
 				headers
 			});
+			latestCommitSha = refRes.json.object.sha;
 		} catch (e: any) {
-			throw new Error(`Could not find branch '${branch}'. Ensure the repository exists and the token has 'repo' scope.`);
+			if (e.status === 404 || (e.message && e.message.includes("404"))) {
+				new Notice(`Git Sync: Branch '${branch}' not found. Attempting to create it...`);
+				// Get repository default branch
+				const repoRes = await requestUrl({
+					url: baseUrl,
+					method: "GET",
+					headers
+				});
+				const defaultBranch = repoRes.json.default_branch;
+				
+				// Get default branch SHA
+				const defRefRes = await requestUrl({
+					url: `${baseUrl}/git/refs/heads/${defaultBranch}`,
+					method: "GET",
+					headers
+				});
+				latestCommitSha = defRefRes.json.object.sha;
+
+				// Create new branch reference
+				await requestUrl({
+					url: `${baseUrl}/git/refs`,
+					method: "POST",
+					headers,
+					body: JSON.stringify({
+						ref: `refs/heads/${branch}`,
+						sha: latestCommitSha
+					})
+				});
+			} else {
+				throw new Error(`Failed to access repository. Ensure it exists and the token has 'repo' scope. (${e.message || e.status})`);
+			}
 		}
-		const latestCommitSha = refRes.json.object.sha;
 
 		// 2. Get base tree
 		const commitRes = await requestUrl({
@@ -149,21 +192,27 @@ export class GitCommitter {
 		const localPathsSet = new Set<string>();
 		
 		let changesCount = 0;
+		let skippedFiles = 0;
 
 		for (const file of localFiles) {
+			if (file.stat.size > this.MAX_FILE_SIZE) {
+				console.warn(`Git Sync: Skipping large file ${file.path} (${(file.stat.size / 1024 / 1024).toFixed(2)} MB)`);
+				skippedFiles++;
+				continue;
+			}
+
 			let relPath = file.path.substring(localFolderPath.length);
 			if (relPath.startsWith("/")) relPath = relPath.substring(1);
 			const finalPath = basePath ? `${basePath}/${relPath}` : relPath;
 			localPathsSet.add(finalPath);
 
-			const isText = ["md", "txt", "canvas", "json", "js", "css", "html"].includes(file.extension);
+			const isText = ["md", "txt", "canvas", "json", "js", "css", "html", "yaml", "yml"].includes(file.extension);
 			const arrayBuffer = await this.app.vault.readBinary(file);
 			const localSha = await this.calculateGitSha(arrayBuffer);
 
 			const remoteSha = remoteFilesMap.get(finalPath);
 
 			if (localSha !== remoteSha) {
-				// Changed or new file
 				changesCount++;
 				if (isText) {
 					const textContent = new TextDecoder("utf-8").decode(arrayBuffer);
@@ -196,29 +245,26 @@ export class GitCommitter {
 
 		// 5. Detect deleted files
 		for (const remotePath of remoteFilesMap.keys()) {
-			// Only care about files in our basePath (if set)
-			if (basePath && !remotePath.startsWith(basePath + "/")) {
-				continue;
-			}
+			if (basePath && !remotePath.startsWith(basePath + "/")) continue;
 			
 			if (!localPathsSet.has(remotePath)) {
-				// File exists on remote but not locally -> delete
 				changesCount++;
 				treeChanges.push({
 					path: remotePath,
 					mode: "100644",
 					type: "blob",
-					sha: null // setting sha to null removes it from the tree
+					sha: null
 				});
 			}
 		}
 
 		if (changesCount === 0) {
-			// Nothing to do
+			new Notice(`Git Sync (GitHub): No changes detected. Branch is up to date.`);
+			if (skippedFiles > 0) new Notice(`Git Sync: Skipped ${skippedFiles} large files (>30MB).`);
 			return;
 		}
 
-		// 6. Create new tree based on baseTreeSha
+		// 6. Create new tree
 		const createTreeRes = await requestUrl({
 			url: `${baseUrl}/git/trees`,
 			method: "POST",
@@ -231,12 +277,13 @@ export class GitCommitter {
 		const newTreeSha = createTreeRes.json.sha;
 
 		// 7. Create new commit
+		const finalCommitMessage = commitMessage?.trim() || `Update from Obsidian (${changesCount} changes)`;
 		const createCommitRes = await requestUrl({
 			url: `${baseUrl}/git/commits`,
 			method: "POST",
 			headers,
 			body: JSON.stringify({
-				message: `Update from Obsidian (${changesCount} changes)`,
+				message: finalCommitMessage,
 				tree: newTreeSha,
 				parents: [latestCommitSha]
 			})
@@ -255,9 +302,10 @@ export class GitCommitter {
 		});
 		
 		new Notice(`Git Sync (GitHub): Successfully pushed ${changesCount} changes!`);
+		if (skippedFiles > 0) new Notice(`Git Sync: Skipped ${skippedFiles} large files (>30MB).`);
 	}
 
-	private async pushToGitlab(repo: { owner: string; repo: string }, branch: string, basePath: string, localFolderPath: string, token: string) {
+	private async pushToGitlab(repo: { owner: string; repo: string }, branch: string, basePath: string, localFolderPath: string, token: string, commitMessage?: string) {
 		const encodedRepo = encodeURIComponent(`${repo.owner}/${repo.repo}`);
 		const baseUrl = `https://gitlab.com/api/v4/projects/${encodedRepo}`;
 		const headers = {
@@ -265,13 +313,41 @@ export class GitCommitter {
 			"Content-Type": "application/json"
 		};
 
+		// 0. Ensure branch exists
+		try {
+			await requestUrl({
+				url: `${baseUrl}/repository/branches/${branch}`,
+				method: "GET",
+				headers
+			});
+		} catch (e: any) {
+			if (e.status === 404 || (e.message && e.message.includes("404"))) {
+				new Notice(`Git Sync: Branch '${branch}' not found. Attempting to create it...`);
+				// Get repo info to find default branch
+				const repoRes = await requestUrl({
+					url: baseUrl,
+					method: "GET",
+					headers
+				});
+				const defaultBranch = repoRes.json.default_branch;
+				
+				await requestUrl({
+					url: `${baseUrl}/repository/branches`,
+					method: "POST",
+					headers,
+					body: JSON.stringify({
+						branch: branch,
+						ref: defaultBranch
+					})
+				});
+			} else {
+				throw new Error(`Failed to access GitLab repository: ${e.message || e.status}`);
+			}
+		}
+
 		// 1. Fetch remote tree
 		let remoteFilesMap = new Map<string, string>(); // path -> id (SHA)
 		try {
-			// Using per_page=100 and assuming it's enough for a small subset, 
-			// but we really should paginate if the repo is large. 
-			// For simplicity and to avoid too many requests on every auto-sync, 
-			// we just fetch up to 1000 items in a single call or loop.
 			let page = 1;
 			while (true) {
 				const treeRes = await requestUrl({
@@ -289,7 +365,6 @@ export class GitCommitter {
 					}
 				}
 				
-				// If less than 100 items returned, we are on the last page
 				if (items.length < 100) break;
 				page++;
 			}
@@ -302,8 +377,15 @@ export class GitCommitter {
 		const localPathsSet = new Set<string>();
 		
 		const actions: Array<{ action: string, file_path: string, content?: string, encoding?: string }> = [];
+		let skippedFiles = 0;
 
 		for (const file of localFiles) {
+			if (file.stat.size > this.MAX_FILE_SIZE) {
+				console.warn(`Git Sync: Skipping large file ${file.path} (${(file.stat.size / 1024 / 1024).toFixed(2)} MB)`);
+				skippedFiles++;
+				continue;
+			}
+
 			let relPath = file.path.substring(localFolderPath.length);
 			if (relPath.startsWith("/")) relPath = relPath.substring(1);
 			const finalPath = basePath ? `${basePath}/${relPath}` : relPath;
@@ -314,13 +396,12 @@ export class GitCommitter {
 			const remoteSha = remoteFilesMap.get(finalPath);
 
 			if (localSha !== remoteSha) {
-				// Determine if it's create or update based on remote existence
 				const actionType = remoteSha ? "update" : "create";
 				
 				let contentStr = "";
 				let encoding = "text";
 
-				if (["md", "txt", "canvas", "json", "js", "css", "html"].includes(file.extension)) {
+				if (["md", "txt", "canvas", "json", "js", "css", "html", "yaml", "yml"].includes(file.extension)) {
 					contentStr = new TextDecoder("utf-8").decode(arrayBuffer);
 				} else {
 					contentStr = this.arrayBufferToBase64(arrayBuffer);
@@ -338,9 +419,7 @@ export class GitCommitter {
 
 		// 3. Detect deleted files
 		for (const remotePath of remoteFilesMap.keys()) {
-			if (basePath && !remotePath.startsWith(basePath + "/")) {
-				continue;
-			}
+			if (basePath && !remotePath.startsWith(basePath + "/")) continue;
 			
 			if (!localPathsSet.has(remotePath)) {
 				actions.push({
@@ -350,11 +429,16 @@ export class GitCommitter {
 			}
 		}
 
-		if (actions.length === 0) return;
+		if (actions.length === 0) {
+			new Notice(`Git Sync (GitLab): No changes detected. Branch is up to date.`);
+			if (skippedFiles > 0) new Notice(`Git Sync: Skipped ${skippedFiles} large files (>30MB).`);
+			return;
+		}
 
-		// 4. Commit (Handle batching for GitLab's 100 action limit)
+		// 4. Commit (Handle batching)
 		const batchSize = 100;
 		let totalChanges = actions.length;
+		const finalCommitMessage = commitMessage?.trim() || `Update from Obsidian`;
 
 		for (let i = 0; i < actions.length; i += batchSize) {
 			const batchActions = actions.slice(i, i + batchSize);
@@ -365,12 +449,13 @@ export class GitCommitter {
 				headers,
 				body: JSON.stringify({
 					branch: branch,
-					commit_message: `Update from Obsidian (${batchActions.length} changes)`,
+					commit_message: `${finalCommitMessage} (${batchActions.length} changes${actions.length > batchSize ? `, batch ${Math.floor(i/batchSize) + 1}` : ''})`,
 					actions: batchActions
 				})
 			});
 		}
 		
 		new Notice(`Git Sync (GitLab): Successfully pushed ${totalChanges} changes!`);
+		if (skippedFiles > 0) new Notice(`Git Sync: Skipped ${skippedFiles} large files (>30MB).`);
 	}
 }

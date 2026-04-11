@@ -655,39 +655,23 @@
 		}
 	}
 
-	async function updateGitSyncMode(mode: string) {
-		try {
-			let updated;
-			if (plugin.shareClientManager) {
-				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, { git_sync_mode: mode as "manual" | "auto" });
-			} else if (plugin.shareClient) {
-				updated = await plugin.shareClient.updateShare(currentShare.id, { git_sync_mode: mode as "manual" | "auto" });
-			}
-			if (updated) await refreshCurrentShare(updated);
-			if (plugin.gitSyncManager) {
-				if (mode === "auto") {
-					plugin.gitSyncManager.registerGitAutoSync(currentShare, currentShare.path);
-					new Notice("Git Auto-sync enabled");
-				} else {
-					plugin.gitSyncManager.unregisterGitAutoSync(currentShare.path);
-					new Notice("Git Auto-sync disabled");
-				}
-			} else {
-				new Notice(`Git Sync mode: ${mode}`);
-			}
-		} catch (e: unknown) {
-			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
-			await refreshCurrentShare({}, false);
-		}
-	}
+
+	let isPushing = false;
+	let commitMessage = "";
 
 	async function pushToGit() {
 		if (!isConnectedLocally || !localFolderPath) {
 			new Notice("Please connect a local folder first to sync from.");
 			return;
 		}
-		if (gitCommitter) {
-			await gitCommitter.pushToGit(currentShare, localFolderPath);
+		isPushing = true;
+		try {
+			if (gitCommitter) {
+				await gitCommitter.pushToGit(currentShare, localFolderPath, commitMessage, editingGitBranch.trim());
+				commitMessage = "";
+			}
+		} finally {
+			isPushing = false;
 		}
 	}
 
@@ -1075,16 +1059,6 @@
 				</div>
 
 				{#if isOwner}
-					<div class="evc-setting-row">
-						<div class="evc-setting-info">
-							<span>Sync Mode</span>
-							<span class="evc-setting-desc">Choose whether to push to Git automatically on file changes or manually.</span>
-						</div>
-						<select class="dropdown" value={currentShare.git_sync_mode || "manual"} on:change={(e) => updateGitSyncMode(e.currentTarget.value)}>
-							<option value="manual">Manual</option>
-							<option value="auto">Auto</option>
-						</select>
-					</div>
 
 					<div class="evc-setting-row">
 						<div class="evc-setting-info">
@@ -1114,11 +1088,22 @@
 					</div>
 					<div class="evc-setting-row">
 						<div class="evc-setting-info">
-							<span>Save Git Settings</span>
+							<span>Commit Message</span>
+							<span class="evc-setting-desc">Optional. Defaults to "Update from Obsidian".</span>
+						</div>
+						<div class="evc-slug-edit">
+							<input type="text" bind:value={commitMessage} placeholder="Update from Obsidian" />
+						</div>
+					</div>
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Git Actions</span>
 						</div>
 						<div class="evc-setting-actions">
 							<button class="evc-small-btn" on:click={saveGitSettings}>Save Settings</button>
-							<button class="mod-cta evc-small-btn" on:click={pushToGit} disabled={!isConnectedLocally || !gitRepoUrl}>Push to Git</button>
+							<button class="mod-cta evc-small-btn" on:click={pushToGit} disabled={!isConnectedLocally || !gitRepoUrl || isPushing}>
+								{isPushing ? "Pushing..." : "Commit & Push"}
+							</button>
 						</div>
 					</div>
 				{/if}
