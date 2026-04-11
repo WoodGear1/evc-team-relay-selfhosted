@@ -26,7 +26,8 @@ export class GitCommitter {
 			path = path.replace(/^\//, "").replace(/\.git$/, "");
 			const parts = path.split("/");
 			if (parts.length >= 2) {
-				return { owner: parts[parts.length - 2], repo: parts[parts.length - 1] };
+				// Join all parts except the last one as the owner (supports GitLab subgroups)
+				return { owner: parts.slice(0, -1).join("/"), repo: parts[parts.length - 1] };
 			}
 			return null;
 		} catch {
@@ -150,6 +151,9 @@ export class GitCommitter {
 					throw repoErr;
 				}
 				const defaultBranch = repoRes.json.default_branch;
+				if (!defaultBranch) {
+					throw new Error(`GitHub repository is completely empty. Please create an initial commit (e.g., add a README file) on GitHub before syncing.`);
+				}
 				
 				// Get default branch SHA
 				const defRefRes = await requestUrl({
@@ -354,6 +358,9 @@ export class GitCommitter {
 					throw repoErr;
 				}
 				const defaultBranch = repoRes.json.default_branch;
+				if (!defaultBranch) {
+					throw new Error(`GitLab repository is completely empty. Please create an initial commit (e.g., add a README file) on GitLab before syncing.`);
+				}
 				
 				await requestUrl({
 					url: `${baseUrl}/repository/branches`,
