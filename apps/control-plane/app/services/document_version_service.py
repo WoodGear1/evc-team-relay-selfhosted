@@ -160,11 +160,18 @@ def build_diff_preview(
         lineterm="",
     ))
     
+    # If there is no diff, and contents are the same, difflib returns an empty list
+    # But if there are changes and we missed them because difflib didn't pick it up?
+    # Actually difflib unified_diff works correctly.
+    
     # If no diff, and it's the first commit, show everything as added
     if not base_version and version_content:
         diff = [f"+{line}" for line in version_content.splitlines()]
         diff = ["--- previous", "+++ current", f"@@ -0,0 +1,{len(diff)} @@"] + diff
 
+    # If it's a single line that changed to another single line without newlines,
+    # difflib correctly handles it as long as we splitlines().
+    
     diff_text = "\n".join(diff)
     
     # If there is a diff but the result string is empty because there are no newlines,
