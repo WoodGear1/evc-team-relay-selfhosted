@@ -28,6 +28,10 @@ export interface RelayOnPremShare {
 	web_sync_mode?: "manual" | "auto"; // v1.8.1 - Sync mode for web publishing
 	web_url?: string | null;
 	web_doc_id?: string | null; // Y-sweet document ID for real-time sync
+	git_repo_url?: string | null; // Git sync repo
+	git_branch?: string | null; // Git branch
+	git_path?: string | null; // Git folder path
+	git_sync_mode?: "manual" | "auto"; // Sync mode for git
 }
 
 /**
@@ -94,6 +98,10 @@ export interface UpdateShareRequest {
 	web_content?: string; // Document content for web publishing
 	web_folder_items?: FolderItem[]; // Folder contents for web publishing
 	web_doc_id?: string; // Y-sweet document ID for real-time sync
+	git_repo_url?: string | null;
+	git_branch?: string | null;
+	git_path?: string | null;
+	git_sync_mode?: "manual" | "auto";
 }
 
 /**
@@ -151,6 +159,8 @@ export interface ServerInfo {
 	features: ServerFeatures;
 	web_publish_enabled?: boolean;
 	web_publish_domain?: string | null;
+	git_repo_url?: string | null;
+	git_sync_enabled?: boolean;
 }
 
 /**
@@ -166,6 +176,18 @@ export interface ServerFeatures {
 	web_publish_enabled?: boolean;
 	web_publish_domain?: string | null;
 	billing_enabled?: boolean;
+	git_repo_url?: string | null;
+	git_sync_enabled?: boolean;
+}
+
+export interface GitSyncStatus {
+	enabled: boolean;
+	repo_url?: string | null;
+	branch?: string | null;
+	last_push_at?: string | null;
+	last_sync_at?: string | null;
+	total_commits?: number;
+	last_error?: string | null;
 }
 
 /**
@@ -940,6 +962,20 @@ export class RelayOnPremShareClient {
 			log("Error getting server info:", error);
 			throw error;
 		}
+	}
+
+	async getGitSyncStatus(shareId?: string): Promise<GitSyncStatus> {
+		const qs = new URLSearchParams();
+		if (shareId) {
+			qs.set("share_id", shareId);
+		}
+		const suffix = qs.toString();
+		const url = `${this.normalizedUrl}/internal/git-sync/status${suffix ? `?${suffix}` : ""}`;
+		const resp = await customFetch(url, { headers: await this.getHeaders() });
+		if (!resp.ok) {
+			throw new Error(`Failed to get git sync status: ${resp.status}`);
+		}
+		return resp.json();
 	}
 
 	/**

@@ -45,6 +45,11 @@ export interface RelayOnPremServer {
 	controlPlaneUrl: string;
 
 	/**
+	 * Optional Git repository URL for version history links.
+	 */
+	gitRepoUrl?: string;
+
+	/**
 	 * Relay server URL (e.g., wss://relay.example.com)
 	 * If not specified, will use the URL from token response
 	 */
@@ -294,6 +299,17 @@ export function validateServerConfig(server: RelayOnPremServer): {
 			}
 		} catch {
 			errors.push("Relay Server URL is invalid");
+		}
+	}
+
+	if (server.gitRepoUrl) {
+		try {
+			const url = new URL(server.gitRepoUrl);
+			if (!url.protocol.match(/^https?:$/)) {
+				errors.push("Git repository URL must use HTTP or HTTPS protocol");
+			}
+		} catch {
+			errors.push("Git repository URL is invalid");
 		}
 	}
 

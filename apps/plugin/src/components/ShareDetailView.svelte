@@ -4,17 +4,26 @@
 	import { createEventDispatcher } from "svelte";
 	import type Live from "../main";
 	import type { RelayOnPremServer } from "../RelayOnPremConfig";
-	import type { ShareMember, Invite, FolderItem, RelayOnPremShareClient } from "../RelayOnPremShareClient";
+	import type {
+		ShareMember,
+		Invite,
+		FolderItem,
+		RelayOnPremShareClient,
+		GitSyncStatus,
+	} from "../RelayOnPremShareClient";
 	import { LimitExceededApiError, VisibilityNotAllowedApiError } from "../RelayOnPremShareClient";
 	import type { ShareWithServer } from "../RelayOnPremShareClientManager";
 	import { FolderSuggestModal } from "../ui/FolderSuggestModal";
 	import { LinkManagementModal } from "../ui/LinkManagementModal";
 	import { S3RN } from "../S3RN";
 	import { confirmDialog, promptDialog, choiceDialog } from "../ui/dialogs";
+	import { GitCommitter } from "../git/GitCommitter";
 
 	export let plugin: Live;
 	export let server: RelayOnPremServer;
 	export let share: ShareWithServer;
+
+	let gitCommitter: GitCommitter;
 
 	const dispatch = createEventDispatcher<{
 		createInvite: void;
@@ -29,6 +38,9 @@
 	let loading = true;
 	let webPublishEnabled = false;
 	let webPublishDomain: string | null = null;
+	let gitRepoUrl: string | null = server.gitRepoUrl || null;
+	let gitSyncEnabled = false;
+	let gitSyncStatus: GitSyncStatus | null = null;
 	let currentShare = share;
 
 	$: if (
@@ -38,10 +50,16 @@
 		share.web_url !== currentShare.web_url ||
 		share.web_slug !== currentShare.web_slug ||
 		share.web_noindex !== currentShare.web_noindex ||
-		share.web_sync_mode !== currentShare.web_sync_mode
+		share.web_sync_mode !== currentShare.web_sync_mode ||
+		share.git_repo_url !== currentShare.git_repo_url ||
+		share.git_branch !== currentShare.git_branch ||
+		share.git_path !== currentShare.git_path
 	) {
 		currentShare = share;
 		editingSlug = currentShare.web_slug || "";
+		editingGitRepoUrl = currentShare.git_repo_url || "";
+		editingGitBranch = currentShare.git_branch || "";
+		editingGitPath = currentShare.git_path || "";
 	}
 
 	// Add member form
@@ -50,8 +68,14 @@
 
 	// Web slug editing
 	let editingSlug = "";
+	
+	// Per-share Git settings editing
+	let editingGitRepoUrl = "";
+	let editingGitBranch = "";
+	let editingGitPath = "";
 
 	onMount(async () => {
+		gitCommitter = new GitCommitter(plugin);
 		await loadDetails();
 	});
 
@@ -78,6 +102,9 @@
 	function applyCurrentShare(nextShare: ShareWithServer, notifyParent = true) {
 		currentShare = nextShare;
 		editingSlug = currentShare.web_slug || "";
+		editingGitRepoUrl = currentShare.git_repo_url || "";
+		editingGitBranch = currentShare.git_branch || "";
+		editingGitPath = currentShare.git_path || "";
 		if (notifyParent) {
 			dispatch("shareUpdated", { share: nextShare });
 		}
@@ -128,9 +155,20 @@
 
 			webPublishEnabled = serverInfo?.features?.web_publish_enabled ?? false;
 			webPublishDomain = serverInfo?.features?.web_publish_domain ?? null;
+			gitRepoUrl =
+				server.gitRepoUrl ||
+				serverInfo?.git_repo_url ||
+				serverInfo?.features?.git_repo_url ||
+				null;
+			gitSyncEnabled = Boolean(
+				serverInfo?.git_sync_enabled ||
+				serverInfo?.features?.git_sync_enabled ||
+				gitRepoUrl,
+			);
 			members = membersResult;
 			invites = invitesResult;
 			editingSlug = currentShare.web_slug || "";
+			await loadGitSyncStatus();
 		} catch (e: unknown) {
 			new Notice(`Failed to load share details: ${e instanceof Error ? e.message : "Unknown error"}`);
 		} finally {
@@ -187,6 +225,42 @@
 			return plugin.shareClientManager.getClient(currentShare.serverId) || null;
 		}
 		return plugin.shareClient || null;
+	}
+
+	function encodeGitPath(path: string): string {
+		return path
+			.split("/")
+			.filter(Boolean)
+			.map((segment) => encodeURIComponent(segment))
+			.join("/");
+	}
+
+	function openGitRepo() {
+		if (!gitRepoUrl) {
+			new Notice("Git repository URL is not configured for this server");
+			return;
+		}
+
+		const route = currentShare.kind === "folder" ? "tree" : "blob";
+		window.open(
+			`${gitRepoUrl.replace(/\/+$/, "")}/${route}/main/${encodeGitPath(currentShare.path)}`,
+			"_blank",
+			"noopener,noreferrer",
+		);
+	}
+
+	async function loadGitSyncStatus() {
+		const client = getShareClient();
+		if (!client) {
+			gitSyncStatus = null;
+			return;
+		}
+
+		try {
+			gitSyncStatus = await client.getGitSyncStatus(currentShare.id);
+		} catch {
+			gitSyncStatus = null;
+		}
 	}
 
 	function openPublishedLinks() {
@@ -581,6 +655,42 @@
 		}
 	}
 
+	async function updateGitSyncMode(mode: string) {
+		try {
+			let updated;
+			if (plugin.shareClientManager) {
+				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, { git_sync_mode: mode as "manual" | "auto" });
+			} else if (plugin.shareClient) {
+				updated = await plugin.shareClient.updateShare(currentShare.id, { git_sync_mode: mode as "manual" | "auto" });
+			}
+			if (updated) await refreshCurrentShare(updated);
+			if (plugin.gitSyncManager) {
+				if (mode === "auto") {
+					plugin.gitSyncManager.registerGitAutoSync(currentShare, currentShare.path);
+					new Notice("Git Auto-sync enabled");
+				} else {
+					plugin.gitSyncManager.unregisterGitAutoSync(currentShare.path);
+					new Notice("Git Auto-sync disabled");
+				}
+			} else {
+				new Notice(`Git Sync mode: ${mode}`);
+			}
+		} catch (e: unknown) {
+			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+			await refreshCurrentShare({}, false);
+		}
+	}
+
+	async function pushToGit() {
+		if (!isConnectedLocally || !localFolderPath) {
+			new Notice("Please connect a local folder first to sync from.");
+			return;
+		}
+		if (gitCommitter) {
+			await gitCommitter.pushToGit(currentShare, localFolderPath);
+		}
+	}
+
 	async function saveWebSlug() {
 		const newSlug = editingSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
 		if (!newSlug || newSlug === currentShare.web_slug) return;
@@ -595,6 +705,38 @@
 				await refreshCurrentShare(updated);
 			}
 			new Notice(`Slug updated: ${newSlug}`);
+		} catch (e: unknown) {
+			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
+			await refreshCurrentShare({}, false);
+		}
+	}
+
+	async function saveGitSettings() {
+		const newRepo = editingGitRepoUrl.trim() || null;
+		const newBranch = editingGitBranch.trim() || null;
+		const newPath = editingGitPath.trim() || null;
+		
+		if (newRepo === currentShare.git_repo_url && newBranch === currentShare.git_branch && newPath === currentShare.git_path) return;
+		
+		try {
+			let updated;
+			if (plugin.shareClientManager) {
+				updated = await plugin.shareClientManager.updateShare(currentShare.serverId, currentShare.id, {
+					git_repo_url: newRepo,
+					git_branch: newBranch,
+					git_path: newPath
+				});
+			} else if (plugin.shareClient) {
+				updated = await plugin.shareClient.updateShare(currentShare.id, {
+					git_repo_url: newRepo,
+					git_branch: newBranch,
+					git_path: newPath
+				});
+			}
+			if (updated) {
+				await refreshCurrentShare(updated);
+			}
+			new Notice("Git settings updated");
 		} catch (e: unknown) {
 			new Notice(`Failed: ${e instanceof Error ? e.message : "Unknown error"}`);
 			await refreshCurrentShare({}, false);
@@ -899,6 +1041,98 @@
 							</span>
 						</div>
 						<button class="evc-small-btn" disabled>Available after publish</button>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		{#if gitSyncEnabled}
+			<div class="evc-section">
+				<div class="evc-section-title">Git Versioning</div>
+
+				<div class="evc-setting-row">
+					<div class="evc-setting-info">
+						<span>Status</span>
+						<span class="evc-setting-desc">
+							{#if gitSyncStatus?.last_push_at}
+								Last push: {new Date(gitSyncStatus.last_push_at).toLocaleString()}
+								{#if gitSyncStatus.total_commits !== undefined}
+									• {gitSyncStatus.total_commits} commits
+								{/if}
+							{:else if gitSyncStatus?.enabled === false}
+								Git sync is disabled on the server
+							{:else}
+								Status unavailable
+							{/if}
+						</span>
+						{#if gitSyncStatus?.last_error}
+							<span class="evc-setting-desc">Last error: {gitSyncStatus.last_error}</span>
+						{/if}
+					</div>
+					<button class="mod-cta evc-small-btn" on:click={openGitRepo} disabled={!gitRepoUrl}>
+						View Repository
+					</button>
+				</div>
+
+				{#if isOwner}
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Sync Mode</span>
+							<span class="evc-setting-desc">Choose whether to push to Git automatically on file changes or manually.</span>
+						</div>
+						<select class="dropdown" value={currentShare.git_sync_mode || "manual"} on:change={(e) => updateGitSyncMode(e.currentTarget.value)}>
+							<option value="manual">Manual</option>
+							<option value="auto">Auto</option>
+						</select>
+					</div>
+
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Custom Git Repository</span>
+							<span class="evc-setting-desc">Override the server's default repository URL for this share.</span>
+						</div>
+						<div class="evc-slug-edit">
+							<input type="text" bind:value={editingGitRepoUrl} placeholder="https://github.com/org/repo.git" />
+						</div>
+					</div>
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Git Branch</span>
+						</div>
+						<div class="evc-slug-edit">
+							<input type="text" bind:value={editingGitBranch} placeholder="main" />
+						</div>
+					</div>
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Git Folder Path</span>
+							<span class="evc-setting-desc">Path inside the repository where this share will be synced.</span>
+						</div>
+						<div class="evc-slug-edit">
+							<input type="text" bind:value={editingGitPath} placeholder="docs/my-folder" />
+						</div>
+					</div>
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Save Git Settings</span>
+						</div>
+						<div class="evc-setting-actions">
+							<button class="evc-small-btn" on:click={saveGitSettings}>Save Settings</button>
+							<button class="mod-cta evc-small-btn" on:click={pushToGit} disabled={!isConnectedLocally || !gitRepoUrl}>Push to Git</button>
+						</div>
+					</div>
+				{/if}
+
+				{#if gitRepoUrl && !isOwner}
+					<div class="evc-setting-row">
+						<div class="evc-setting-info">
+							<span>Repository</span>
+							<span class="evc-setting-desc">{gitRepoUrl}</span>
+						</div>
+						<div class="evc-setting-actions">
+							<button class="evc-small-btn" on:click={() => navigator.clipboard.writeText(gitRepoUrl || "")}>Copy</button>
+							<button class="evc-small-btn" on:click={openGitRepo}>Open</button>
+						</div>
 					</div>
 				{/if}
 			</div>

@@ -3,12 +3,15 @@ import type {
 	DocumentVersion,
 	RelayOnPremShareClient,
 } from "../RelayOnPremShareClient";
+import { renderUnifiedDiff } from "./renderUnifiedDiff";
 
 export class DocumentHistoryModal extends Modal {
 	private versions: DocumentVersion[] = [];
 	private diffPreview = "";
 	private selectedVersionId: string | null = null;
 	private loading = true;
+	/** True while fetching diff for the selected version (including first load). */
+	private loadingDiff = false;
 	private error: string | null = null;
 
 	constructor(
@@ -17,13 +20,39 @@ export class DocumentHistoryModal extends Modal {
 		private readonly shareId: string,
 		private readonly documentPath: string,
 		private readonly onRestoreContent: (content: string) => Promise<void>,
+		private readonly gitRepoUrl?: string | null,
+		private readonly gitDocumentPath?: string,
 	) {
 		super(app);
+		this.modalEl.addClass("evc-document-history-modal");
+	}
+
+	private encodeGitPath(path: string): string {
+		return path
+			.split("/")
+			.filter(Boolean)
+			.map((segment) => encodeURIComponent(segment))
+			.join("/");
+	}
+
+	private openGitHistory(): void {
+		if (!this.gitRepoUrl || !this.gitDocumentPath) {
+			new Notice("Git history is not configured for this document.");
+			return;
+		}
+
+		window.open(
+			`${this.gitRepoUrl.replace(/\/+$/, "")}/commits/main/${this.encodeGitPath(this.gitDocumentPath)}`,
+			"_blank",
+			"noopener,noreferrer",
+		);
 	}
 
 	async onOpen() {
 		this.contentEl.empty();
 		this.contentEl.addClass("document-history-modal");
+		this.modalEl.style.width = "min(92vw, 880px)";
+		this.modalEl.style.maxWidth = "880px";
 		this.contentEl.createEl("h2", { text: "Document history" });
 		await this.loadVersions();
 		this.render();
@@ -49,12 +78,16 @@ export class DocumentHistoryModal extends Modal {
 	}
 
 	private async loadDiff(versionId: string) {
+		this.loadingDiff = true;
 		try {
 			const diff = await this.client.getDocumentVersionDiff(versionId);
-			this.diffPreview = diff.diff_preview || "No textual diff available.";
+			const raw = diff.diff_preview?.trim() ?? "";
+			this.diffPreview = raw || "";
 		} catch (error: unknown) {
 			this.diffPreview =
 				error instanceof Error ? error.message : "Unable to load diff preview.";
+		} finally {
+			this.loadingDiff = false;
 		}
 	}
 
@@ -79,48 +112,60 @@ export class DocumentHistoryModal extends Modal {
 			return;
 		}
 
-		const layout = container.createDiv({ cls: "evc-flex" });
-		layout.style.gap = "16px";
+		const layout = container.createDiv({ cls: "evc-document-history-layout" });
 
-		const list = layout.createDiv();
-		list.style.minWidth = "260px";
-		list.style.maxHeight = "420px";
-		list.style.overflowY = "auto";
+		const list = layout.createDiv({ cls: "evc-document-history-list" });
 
-		const preview = layout.createDiv();
-		preview.style.flex = "1";
+		const preview = layout.createDiv({ cls: "evc-document-history-preview" });
 
 		this.versions.forEach((version) => {
-			const item = list.createDiv({ cls: "document-history-item" });
-			item.style.padding = "10px";
-			item.style.border = "1px solid var(--background-modifier-border)";
-			item.style.borderRadius = "8px";
-			item.style.marginBottom = "8px";
-			item.style.cursor = "pointer";
+			const item = list.createDiv({
+				cls: "evc-document-history-item",
+			});
 			if (version.id === this.selectedVersionId) {
-				item.style.borderColor = "var(--interactive-accent)";
+				item.addClass("is-selected");
 			}
 
-			item.createEl("strong", {
+			item.createEl("div", {
+				cls: "evc-document-history-item__time",
 				text: new Date(version.created_at).toLocaleString(),
 			});
 			item.createEl("div", {
 				text: version.created_by_email || "Unknown author",
-				cls: "setting-item-description",
+				cls: "evc-document-history-item__author",
+			});
+			item.createEl("div", {
+				cls: "evc-document-history-item__hash",
+				text: version.content_hash.slice(0, 8),
 			});
 			item.onclick = async () => {
+				if (this.selectedVersionId === version.id) return;
 				this.selectedVersionId = version.id;
+				this.render();
 				await this.loadDiff(version.id);
 				this.render();
 			};
 		});
 
-		preview.createEl("h4", { text: "Diff preview" });
-		const diff = preview.createEl("pre");
-		diff.setText(this.diffPreview);
-		diff.style.maxHeight = "320px";
-		diff.style.overflow = "auto";
-		diff.style.whiteSpace = "pre-wrap";
+		preview.createEl("div", { cls: "evc-document-history-preview__title", text: "Diff" });
+		const diffHost = preview.createDiv({ cls: "evc-document-history-diff-host" });
+		if (this.loadingDiff) {
+			diffHost.createEl("div", {
+				cls: "evc-document-history-diff-loading",
+				text: "Loading diff…",
+			});
+		} else {
+			renderUnifiedDiff(diffHost, this.diffPreview);
+		}
+
+		if (this.gitRepoUrl && this.gitDocumentPath) {
+			new Setting(preview)
+				.setName("View on GitHub")
+				.setDesc("Open this file history in the configured repository.")
+				.addButton((button: ButtonComponent) => {
+					button.setButtonText("Open GitHub").onClick(() => this.openGitHistory());
+				});
+		}
 
 		new Setting(preview)
 			.setName("Restore selected version")

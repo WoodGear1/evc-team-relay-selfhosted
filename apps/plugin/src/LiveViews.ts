@@ -39,6 +39,12 @@ import { SyncType } from "./SyncTypes";
 
 const BACKGROUND_CONNECTIONS = 3;
 
+type CommandCapableApp = App & {
+	commands: {
+		executeCommandById: (id: string) => unknown;
+	};
+};
+
 function iterateCanvasViews(
 	workspace: Workspace,
 	fn: (leaf: CanvasView) => void,
@@ -279,6 +285,9 @@ export class RelayCanvasView implements S3View {
 						view: this,
 						state: this.canvas.state,
 						remote: this.canvas.sharedFolder.remote,
+						onOpenHistory: () => {
+							void (this._parent.app as CommandCapableApp).commands.executeCommandById("evc-team-relay:document-history");
+						},
 						changedRemotely: false,
 					},
 				});
@@ -599,6 +608,9 @@ export class LiveView<ViewType extends TextFileView>
 						view: this,
 						state: this.document.state,
 						remote: this.document.sharedFolder.remote,
+						onOpenHistory: () => {
+							void (this._parent.app as CommandCapableApp).commands.executeCommandById("evc-team-relay:document-history");
+						},
 						changedRemotely: this.document.changedRemotely,
 					},
 				});

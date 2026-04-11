@@ -135,12 +135,16 @@ interface RelaySettings extends FeatureFlags, DebugSettings {
 	sharedFolders: SharedFolderSettings[];
 	endpoints: EndpointSettings;
 	relayOnPrem: RelayOnPremSettings;
+	gitProvider?: "github" | "gitlab" | "none";
+	gitToken?: string;
 }
 
 const DEFAULT_SETTINGS: RelaySettings = {
 	sharedFolders: [],
 	endpoints: {},
 	relayOnPrem: DEFAULT_RELAY_ONPREM_SETTINGS,
+	gitProvider: "none",
+	gitToken: "",
 	...FeatureFlagDefaults,
 	...DEFAULT_DEBUG_SETTINGS,
 };
@@ -177,6 +181,7 @@ export default class Live extends Plugin {
 	public shareClient?: RelayOnPremShareClient;
 	public shareClientManager?: RelayOnPremShareClientManager;
 	public webSyncManager?: import("./WebSyncManager").WebSyncManager;
+	public gitSyncManager?: import("./GitSyncManager").GitSyncManager;
 	debug!: (...args: unknown[]) => void;
 	log!: (...args: unknown[]) => void;
 	warn!: (...args: unknown[]) => void;
@@ -884,6 +889,10 @@ export default class Live extends Plugin {
 				this.vault,
 				this.shareClientManager
 			);
+			
+			const { GitCommitter } = await import("./git/GitCommitter");
+			const { GitSyncManager } = await import("./GitSyncManager");
+			this.gitSyncManager = new GitSyncManager(new GitCommitter(this));
 		}
 
 		// Add status bar item for Relay On-Prem (v1.8.2)
@@ -1250,6 +1259,24 @@ export default class Live extends Plugin {
 									});
 							});
 						}
+						if (file.extension === "md" || file.extension === "canvas") {
+							menu.addItem((item) => {
+								item
+									.setTitle("Relay: document history")
+									.setIcon("history")
+									.onClick(async () => {
+										try {
+											await this.openDocumentHistory(file);
+										} catch (error: unknown) {
+											new Notice(
+												error instanceof Error
+													? error.message
+													: "Unable to open document history",
+											);
+										}
+									});
+							});
+						}
 					}
 				}),
 			);
@@ -1384,6 +1411,17 @@ export default class Live extends Plugin {
 							log(`Registered auto-sync for ${share.kind} ${share.path} on server ${share.serverId}`);
 						}
 					}
+
+					// Register git auto-sync shares
+					if (share.git_sync_mode === "auto") {
+						if (this.gitSyncManager) {
+							this.gitSyncManager.registerGitAutoSync(
+								share,
+								share.path
+							);
+							log(`Registered git auto-sync for ${share.kind} ${share.path} on server ${share.serverId}`);
+						}
+					}
 				}
 			} else if (this.shareClient) {
 				// Single-server mode (legacy)
@@ -1454,6 +1492,17 @@ export default class Live extends Plugin {
 								share.web_slug ?? undefined
 							);
 							log(`Registered auto-sync for ${share.kind} ${share.path}`);
+						}
+					}
+
+					// Register git auto-sync shares
+					if (share.git_sync_mode === "auto") {
+						if (this.gitSyncManager) {
+							this.gitSyncManager.registerGitAutoSync(
+								{ ...share, serverId: defaultServerId, serverName: "Default Server" },
+								share.path
+							);
+							log(`Registered git auto-sync for ${share.kind} ${share.path}`);
 						}
 					}
 				}
@@ -2549,9 +2598,68 @@ export default class Live extends Plugin {
 		client: RelayOnPremShareClient;
 		shareId: string;
 		documentPath: string;
+		serverId: string;
+		gitDocumentPath: string;
 	} | null> {
+		await this.ensureShareClientManager();
+
+		const localSharedFolder = this.sharedFolders.lookup(file.path);
 		if (!this.shareClientManager) {
-			return null;
+			const fallbackClient = this.getDefaultRelayClient();
+			if (
+				!fallbackClient ||
+				!localSharedFolder?.guid ||
+				!localSharedFolder.path
+			) {
+				return null;
+			}
+
+			const relativePath = file.path.startsWith(localSharedFolder.path)
+				? file.path.slice(localSharedFolder.path.length).replace(/^\/+/, '')
+				: file.path;
+			if (!relativePath) {
+				return null;
+			}
+
+			const settings = this.relayOnPremSettings.get();
+			const serverId =
+				localSharedFolder.settings?.onpremServerId ||
+				settings.defaultServerId ||
+				settings.servers[0]?.id;
+			if (!serverId) {
+				return null;
+			}
+
+			return {
+				client: fallbackClient,
+				shareId: localSharedFolder.guid,
+				documentPath: relativePath,
+				serverId,
+				gitDocumentPath: normalizePath(`${localSharedFolder.path}/${relativePath}`),
+			};
+		}
+
+		if (
+			localSharedFolder?.guid &&
+			localSharedFolder.path &&
+			localSharedFolder.settings?.onpremServerId
+		) {
+			const client = this.shareClientManager.getClient(localSharedFolder.settings.onpremServerId);
+			if (client) {
+				const relativePath = file.path.startsWith(localSharedFolder.path)
+					? file.path.slice(localSharedFolder.path.length).replace(/^\/+/, '')
+					: file.path;
+
+				if (relativePath) {
+					return {
+						client,
+						shareId: localSharedFolder.guid,
+						documentPath: relativePath,
+						serverId: localSharedFolder.settings.onpremServerId,
+						gitDocumentPath: normalizePath(`${localSharedFolder.path}/${relativePath}`),
+					};
+				}
+			}
 		}
 
 		const shares = await this.shareClientManager.getAllSharesFlat();
@@ -2567,6 +2675,8 @@ export default class Live extends Plugin {
 				client,
 				shareId: directShare.id,
 				documentPath: file.path,
+				serverId: directShare.serverId,
+				gitDocumentPath: directShare.path,
 			};
 		}
 
@@ -2584,6 +2694,10 @@ export default class Live extends Plugin {
 			client,
 			shareId: folderShare.share.id,
 			documentPath: folderShare.relativePath.replace(/^\/+/, ""),
+			serverId: folderShare.share.serverId,
+			gitDocumentPath: normalizePath(
+				`${folderShare.share.path}/${folderShare.relativePath.replace(/^\/+/, "")}`,
+			),
 		};
 	}
 
@@ -2629,16 +2743,27 @@ export default class Live extends Plugin {
 		});
 	}
 
-	private async openDocumentHistory(): Promise<void> {
-		const activeFile = this.app.workspace.getActiveFile();
-		if (!activeFile) {
+	private async openDocumentHistory(targetFile?: TFile): Promise<void> {
+		const file = targetFile ?? this.app.workspace.getActiveFile();
+		if (!file) {
 			throw new Error("No active file");
 		}
 
-		const context = await this.resolveDocumentVersionContext(activeFile);
-		if (!context) {
-			throw new Error("The current file is not in a shared document context");
+		const loadingNotice = new Notice(`Opening history for ${file.name}...`, 0);
+		let context = null;
+		try {
+			context = await this.resolveDocumentVersionContext(file);
+		} finally {
+			loadingNotice.hide();
 		}
+		if (!context) {
+			throw new Error("This file is not in a shared Relay web-published context, or the server session is not ready yet");
+		}
+
+		const gitRepoUrl =
+			this.relayOnPremSettings
+				.get()
+				.servers.find((server) => server.id === context.serverId)?.gitRepoUrl || null;
 
 		const modal = new DocumentHistoryModal(
 			this.app,
@@ -2646,9 +2771,11 @@ export default class Live extends Plugin {
 			context.shareId,
 			context.documentPath,
 			async (content: string) => {
-				await this.vault.modify(activeFile, content);
-				this.queueDocumentVersionSnapshot(activeFile);
+				await this.vault.modify(file, content);
+				this.queueDocumentVersionSnapshot(file);
 			},
+			gitRepoUrl,
+			context.gitDocumentPath,
 		);
 		this.openModals.push(modal);
 		modal.open();
@@ -2847,6 +2974,9 @@ export default class Live extends Plugin {
 				if (this.webSyncManager && tfile instanceof TFile) {
 					void this.webSyncManager.onFileCreated(tfile);
 				}
+				if (this.gitSyncManager && (tfile instanceof TFile || tfile instanceof TFolder)) {
+					void this.gitSyncManager.onFileCreated(tfile);
+				}
 				if (tfile instanceof TFile) {
 					void this.attachmentManager.handleFileCreated(tfile);
 					void this.attachmentManager.captureInitialReferences(tfile);
@@ -2878,6 +3008,9 @@ export default class Live extends Plugin {
 				}
 				// Update web_folder_items for auto-sync folder shares
 				void this.webSyncManager?.onFileDeleted(file.path);
+				if (file instanceof TFile || file instanceof TFolder) {
+					void this.gitSyncManager?.onFileDeleted(file);
+				}
 				if (file instanceof TFile && file.extension === "md") {
 					this.attachmentManager.handleNoteDeleted(file.path);
 				}
@@ -2960,6 +3093,10 @@ export default class Live extends Plugin {
 				// Handle auto-sync to web (v1.8.1)
 				if (this.webSyncManager && tfile instanceof TFile) {
 					void this.webSyncManager.onFileModified(tfile);
+				}
+				// Handle auto-sync to git
+				if (this.gitSyncManager && (tfile instanceof TFile || tfile instanceof TFolder)) {
+					void this.gitSyncManager.onFileModified(tfile);
 				}
 				if (tfile instanceof TFile) {
 					this.queueDocumentVersionSnapshot(tfile);
@@ -3251,6 +3388,11 @@ export default class Live extends Plugin {
 		if (this.webSyncManager) {
 			this.webSyncManager.destroy();
 			this.webSyncManager = undefined;
+		}
+
+		if (this.gitSyncManager) {
+			this.gitSyncManager.destroy();
+			this.gitSyncManager = undefined;
 		}
 
 		this.hashStore.destroy();

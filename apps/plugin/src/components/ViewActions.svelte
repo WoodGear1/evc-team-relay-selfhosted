@@ -10,6 +10,7 @@
 	export let remote: RemoteSharedFolder;
 	export let isLoggedOut: boolean = false;
 	export let onLogin: (() => Promise<boolean>) | undefined = undefined;
+export let onOpenHistory: (() => void) | undefined = undefined;
 export let changedRemotely: boolean = false;
 
 	const ariaLabels: Record<ConnectionStatus, string> = {
@@ -32,6 +33,16 @@ export let changedRemotely: boolean = false;
 			handleClick();
 		}
 	};
+
+const handleHistoryClick = () => {
+	onOpenHistory?.();
+};
+
+const handleHistoryKeyPress = (event: KeyboardEvent) => {
+	if (event.key === "Enter") {
+		handleHistoryClick();
+	}
+};
 </script>
 
 {#if isLoggedOut}
@@ -41,11 +52,11 @@ export let changedRemotely: boolean = false;
 		class="clickable-icon view-action system3-view-action {view.tracking
 			? 'notebook-synced'
 			: 'notebook'} {changedRemotely ? 'changed-remotely' : ''}"
-		aria-label={view.tracking
-			? "Tracking changes: local file and update log are in sync"
-			: "Not tracking changes: local file and update log are not in sync"}
+		aria-label="Open document history"
 		tabindex="0"
 		data-filename={view.view.file?.name}
+		on:click={handleHistoryClick}
+		on:keypress={handleHistoryKeyPress}
 	>
 		<Layers class="svg-icon inline-icon" />
 	</button>
@@ -63,11 +74,11 @@ export let changedRemotely: boolean = false;
 		class="clickable-icon view-action system3-view-action {view.tracking
 			? 'notebook-synced'
 			: 'notebook'} {changedRemotely ? 'changed-remotely' : ''}"
-		aria-label={view.tracking
-			? "Tracking changes: local file and update log are in sync"
-			: "Not tracking changes: local file and update log are not in sync"}
+		aria-label="Open document history"
 		tabindex="0"
 		data-filename={view.view.file?.name}
+		on:click={handleHistoryClick}
+		on:keypress={handleHistoryKeyPress}
 	>
 		<Layers class="svg-icon inline-icon" />
 	</button>

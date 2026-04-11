@@ -29,6 +29,8 @@ export class WebSyncManager {
 	// Debounced sync function per file path
 	private debouncedSyncMap: Map<string, () => void> = new Map();
 
+	private debouncedRenameSyncMap: Map<string, () => void> = new Map();
+
 	constructor(
 		vault: Vault,
 		clientManager: RelayOnPremShareClientManager
@@ -56,13 +58,24 @@ export class WebSyncManager {
 			webSlug,
 		});
 
-		// Create debounced sync function for this file/folder
+		// Create debounced sync functions
 		if (!this.debouncedSyncMap.has(filePath)) {
 			this.debouncedSyncMap.set(
 				filePath,
 				debounce(
 					() => this.syncFile(filePath),
 					this.syncDebounceMs,
+					true
+				)
+			);
+		}
+		
+		if (!this.debouncedRenameSyncMap.has(filePath)) {
+			this.debouncedRenameSyncMap.set(
+				filePath,
+				debounce(
+					() => this.syncFolderStructure(filePath),
+					1000, // 1 second debounce for folder structure updates
 					true
 				)
 			);
@@ -76,6 +89,31 @@ export class WebSyncManager {
 		log("Unregistering auto-sync share", { filePath });
 		this.autoSyncShares.delete(filePath);
 		this.debouncedSyncMap.delete(filePath);
+		this.debouncedRenameSyncMap.delete(filePath);
+	}
+
+	/**
+	 * Internal method to sync just the folder structure for a share
+	 */
+	private async syncFolderStructure(folderPath: string): Promise<void> {
+		const shareInfo = this.autoSyncShares.get(folderPath);
+		if (!shareInfo || shareInfo.kind !== "folder") return;
+
+		log("Debounced sync folder structure", { folderPath, shareId: shareInfo.shareId });
+		try {
+			const items = this.getFolderItems(folderPath);
+			await this.clientManager.updateShare(
+				shareInfo.serverId,
+				shareInfo.shareId,
+				{ web_folder_items: items }
+			);
+			log("Updated web_folder_items successfully", { folderPath, itemCount: items.length });
+		} catch (error: unknown) {
+			log("Failed to update web_folder_items", {
+				folderPath,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
 	}
 
 	/**
@@ -255,29 +293,14 @@ export class WebSyncManager {
 			if (shareInfo.kind !== "folder") continue;
 			if (!file.path.startsWith(folderPath + "/")) continue;
 
-			log("File created in auto-sync folder, updating web_folder_items", {
+			log("File created in auto-sync folder, scheduling web_folder_items update", {
 				filePath: file.path,
 				folderPath,
 				shareId: shareInfo.shareId,
 			});
 
-			try {
-				const items = this.getFolderItems(folderPath);
-				await this.clientManager.updateShare(
-					shareInfo.serverId,
-					shareInfo.shareId,
-					{ web_folder_items: items }
-				);
-				log("Updated web_folder_items after creation", {
-					folderPath,
-					itemCount: items.length,
-				});
-			} catch (error: unknown) {
-				log("Failed to update web_folder_items after creation", {
-					filePath: file.path,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			}
+			const debouncedSync = this.debouncedRenameSyncMap.get(folderPath);
+			if (debouncedSync) debouncedSync();
 			return;
 		}
 	}
@@ -294,31 +317,15 @@ export class WebSyncManager {
 				!oldPath.startsWith(folderPath + "/")
 			) continue;
 
-			log("File renamed in auto-sync folder, updating web_folder_items", {
+			log("File renamed in auto-sync folder, scheduling web_folder_items update", {
 				oldPath,
 				newPath,
 				folderPath,
 				shareId: shareInfo.shareId,
 			});
 
-			try {
-				const items = this.getFolderItems(folderPath);
-				await this.clientManager.updateShare(
-					shareInfo.serverId,
-					shareInfo.shareId,
-					{ web_folder_items: items }
-				);
-				log("Updated web_folder_items after rename", {
-					folderPath,
-					itemCount: items.length,
-				});
-			} catch (error: unknown) {
-				log("Failed to update web_folder_items after rename", {
-					oldPath,
-					newPath,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			}
+			const debouncedSync = this.debouncedRenameSyncMap.get(folderPath);
+			if (debouncedSync) debouncedSync();
 			// Don't return early — file could affect multiple folder shares (moved between)
 		}
 	}
@@ -331,29 +338,14 @@ export class WebSyncManager {
 			if (shareInfo.kind !== "folder") continue;
 			if (!filePath.startsWith(folderPath + "/")) continue;
 
-			log("File deleted from auto-sync folder, updating web_folder_items", {
+			log("File deleted from auto-sync folder, scheduling web_folder_items update", {
 				filePath,
 				folderPath,
 				shareId: shareInfo.shareId,
 			});
 
-			try {
-				const items = this.getFolderItems(folderPath);
-				await this.clientManager.updateShare(
-					shareInfo.serverId,
-					shareInfo.shareId,
-					{ web_folder_items: items }
-				);
-				log("Updated web_folder_items after deletion", {
-					folderPath,
-					itemCount: items.length,
-				});
-			} catch (error: unknown) {
-				log("Failed to update web_folder_items after deletion", {
-					filePath,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			}
+			const debouncedSync = this.debouncedRenameSyncMap.get(folderPath);
+			if (debouncedSync) debouncedSync();
 			return;
 		}
 	}

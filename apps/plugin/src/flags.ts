@@ -22,7 +22,7 @@ export const FeatureFlagDefaults: FeatureFlags = {
 	enableDocumentStatus: false,
 	enableNewLinkFormat: false,
 	enableDeltaLogging: false,
-	enableDocumentHistory: false,
+	enableDocumentHistory: true,
 	enableEditorTweens: false,
 	enableNetworkLogging: false,
 	enableCanvasSync: false,

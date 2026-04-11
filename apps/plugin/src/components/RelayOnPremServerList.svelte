@@ -7,6 +7,7 @@
 	import { RelayOnPremLoginModal } from "../ui/RelayOnPremLoginModal";
 	import { customFetch } from "../customFetch";
 	import { confirmDialog } from "../ui/dialogs";
+	import GitSyncSettings from "./GitSyncSettings.svelte";
 
 	export let plugin: Live;
 
@@ -32,6 +33,7 @@
 	let newServerName = "";
 	let newControlPlaneUrl = "";
 	let newRelayServerUrl = "";
+	let newGitRepoUrl = "";
 	let formError = "";
 
 	// Testing state
@@ -81,6 +83,7 @@
 		newServerName = "";
 		newControlPlaneUrl = "";
 		newRelayServerUrl = "";
+		newGitRepoUrl = "";
 		formError = "";
 	}
 
@@ -90,6 +93,7 @@
 		newServerName = server.name;
 		newControlPlaneUrl = server.controlPlaneUrl;
 		newRelayServerUrl = server.relayServerUrl || "";
+		newGitRepoUrl = server.gitRepoUrl || "";
 		formError = "";
 	}
 
@@ -107,6 +111,8 @@
 		oauth_enabled?: boolean;
 		oauth_provider?: string | null;
 		billing_enabled?: boolean;
+		git_sync_enabled?: boolean;
+		git_repo_url?: string | null;
 	}
 
 	interface ServerInfo {
@@ -116,6 +122,7 @@
 		relay_url: string;
 		edition?: string;
 		features: ServerFeatures;
+		git_repo_url?: string | null;
 	}
 
 	async function fetchServerInfo(url: string): Promise<ServerInfo | null> {
@@ -180,6 +187,11 @@
 		// Use server info or fallback to user input
 		const serverName = newServerName.trim() || serverInfo?.name || new URL(newControlPlaneUrl).hostname;
 		const relayUrl = newRelayServerUrl.trim() || serverInfo?.relay_url || undefined;
+		const gitRepoUrl =
+			newGitRepoUrl.trim() ||
+			serverInfo?.git_repo_url ||
+			serverInfo?.features?.git_repo_url ||
+			undefined;
 
 		// Generate or use existing ID (prefer server's own ID if available)
 		const serverId = editingServer?.id || serverInfo?.id || generateServerId(newControlPlaneUrl);
@@ -189,6 +201,7 @@
 			name: serverName,
 			controlPlaneUrl: newControlPlaneUrl.trim(),
 			relayServerUrl: relayUrl,
+			gitRepoUrl,
 			isValidated: true,
 			lastValidated: Date.now(),
 			lastUserEmail: editingServer?.lastUserEmail,
@@ -373,6 +386,9 @@
 					{/if}
 				</div>
 				<div class="relay-server-url">{server.controlPlaneUrl}</div>
+				{#if server.gitRepoUrl}
+					<div class="relay-server-user">Git repo: {server.gitRepoUrl}</div>
+				{/if}
 				{#if authStatus.isLoggedIn && authStatus.email}
 					<div class="relay-server-user">As: {authStatus.email}</div>
 				{/if}
@@ -460,6 +476,16 @@
 				/>
 			</div>
 
+			<div class="relay-server-form-field">
+				<label for="git-repo-url">Git Repository URL (optional)</label>
+				<input
+					id="git-repo-url"
+					type="text"
+					placeholder="https://github.com/org/repo"
+					bind:value={newGitRepoUrl}
+				/>
+			</div>
+
 			{#if formError}
 				<div class="relay-server-form-error">{formError}</div>
 			{/if}
@@ -477,6 +503,8 @@
 		</button>
 	{/if}
 </div>
+
+<GitSyncSettings {plugin} />
 
 <style>
 	.relay-server-list {
