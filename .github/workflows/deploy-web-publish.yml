@@ -1,0 +1,70 @@
+name: Build, Push and Deploy (Web Publish)
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "apps/web-publish/**"
+      - "packages/tokens/**"
+      - "Dockerfile.web-publish"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-web-publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-push-and-bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set tag (short sha)
+        run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push Docker image (sha + latest)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.web-publish
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/roomsquad/obsidian-web-publish:${{ env.TAG }}
+            ghcr.io/roomsquad/obsidian-web-publish:latest
+
+      # Note: This step assumes the deploy manifests are kept in the same repo,
+      # or that you have another repo for GitOps. Adjust the FILE path accordingly.
+      - name: Update deployment.yaml image tag
+        run: |
+          # Change this path to where your web-publish-deployment.yaml is stored
+          FILE="deploy/web-publish-deployment.yaml"
+
+          if [ -f "$FILE" ]; then
+            sed -i "s|^\(\s*image:\s*ghcr\.io/roomsquad/obsidian-web-publish:\).*|\1${TAG}|g" "$FILE"
+            echo "Updated image tag to: ${TAG}"
+            grep -n "image:\s*ghcr.io/roomsquad/obsidian-web-publish" "$FILE" || true
+            
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$FILE"
+            git diff --cached --quiet && echo "No changes to commit" && exit 0
+            git commit -m "chore(deploy): bump obsidian-web-publish to ${TAG}"
+            git push
+          else
+            echo "Deployment manifest not found in this repo, skipping GitOps commit."
+          fi

@@ -1,0 +1,32 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+# Copy root package.json for workspaces
+COPY package.json package-lock.json* ./
+# Copy workspace packages
+COPY packages/ packages/
+COPY apps/web-publish/ apps/web-publish/
+
+# Install dependencies using workspaces
+RUN npm install
+
+# Build the web-publish app
+WORKDIR /app/apps/web-publish
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+# Copy the built app from builder
+COPY --from=builder /app/apps/web-publish/build ./build
+COPY --from=builder /app/apps/web-publish/package.json ./
+# SvelteKit adapter-node might require node_modules if not fully bundled, 
+# but usually we just copy the production node_modules from builder.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/web-publish/node_modules ./apps/web-publish/node_modules
+
+EXPOSE 3000
+ENV NODE_ENV=production
+ENV PORT=3000
+
+CMD ["node", "build/index.js"]
