@@ -7,7 +7,7 @@
 
 /** Built-in relay server entry */
 export const EVC_SERVER_ID = "evc-team-relay";
-export const EVC_CP_URL = "https://cp.tr.entire.vc";
+export const EVC_CP_URL = "https://cp.obsidian.wgwg.ru";
 
 /**
  * Generate a unique server ID from URL
