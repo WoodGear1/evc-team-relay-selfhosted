@@ -899,7 +899,7 @@ export async function renderMarkdown(markdown: string, context?: RenderContext):
 	const withCustomBlocks = processCustomBlocks(withMath);
 
 	// Step 5: Sanitize
-	const purify = DOMPurify.sanitize ? DOMPurify : (DOMPurify as any).default || DOMPurify;
+	const purify = (DOMPurify as any).sanitize ? DOMPurify : (DOMPurify as any).default || DOMPurify;
 	const sanitizedHtml = purify.sanitize(withCustomBlocks, SANITIZE_CONFIG);
 
 	// Clear context after rendering
