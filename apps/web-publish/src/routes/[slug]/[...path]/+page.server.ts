@@ -3,8 +3,10 @@ import { getFolderFileContent } from '$lib/api';
 import { getPrevNextForPath, slugifyPath } from '$lib/file-tree';
 import {
 	applyPrivateCacheHeaders,
+	canAccessProtectedContent,
 	getRequestTokens,
 	requireDocumentAccess,
+	requiresPasswordPrompt,
 	resolveWebAccessContext
 } from '$lib/webAccess';
 import type { PageServerLoad } from './$types';
@@ -22,7 +24,10 @@ export const load: PageServerLoad = async ({ params, cookies, setHeaders }) => {
 		}
 
 		applyPrivateCacheHeaders(setHeaders, access);
-		requireDocumentAccess(access);
+		requireDocumentAccess(access, true);
+
+		const needsPassword = requiresPasswordPrompt(access);
+		const canRevealContent = canAccessProtectedContent(access);
 
 		// Find the file in folder items
 		// Support both exact match and slugified match (spaces → hyphens in URL)
@@ -40,21 +45,22 @@ export const load: PageServerLoad = async ({ params, cookies, setHeaders }) => {
 		const originalPath = file.path;
 
 		// Try to fetch file content from API
-		let content: string;
-		try {
-			const fileContent = await getFolderFileContent(
-				slug,
-				originalPath,
-				access.sessionToken,
-				access.authToken,
-				resourceKind
-			);
-			content = fileContent.has_content
-				? fileContent.content
-				: '# Content not available\n\nThis file has not been synced yet.';
-		} catch (fetchError) {
-			// If file content fetch fails, show placeholder
-			content = `# ${file.name}
+		let content: string | null = null;
+		if (canRevealContent) {
+			try {
+				const fileContent = await getFolderFileContent(
+					slug,
+					originalPath,
+					access.sessionToken,
+					access.authToken,
+					resourceKind
+				);
+				content = fileContent.has_content
+					? fileContent.content
+					: '# Content not available\n\nThis file has not been synced yet.';
+			} catch (fetchError) {
+				// If file content fetch fails, show placeholder
+				content = `# ${file.name}
 
 > **Content not yet synced**
 >
@@ -64,6 +70,7 @@ export const load: PageServerLoad = async ({ params, cookies, setHeaders }) => {
 > 1. Re-sync this folder share from the Obsidian plugin
 > 2. Or create a separate share for this specific document
 `;
+			}
 		}
 
 		return {
@@ -74,6 +81,7 @@ export const load: PageServerLoad = async ({ params, cookies, setHeaders }) => {
 			documentPath: originalPath,
 			parentSlug: slug,
 			folderItems,
+			needsPassword,
 			previousPage: navigation.previous
 				? { ...navigation.previous, slugPath: slugifyPath(navigation.previous.path) }
 				: null,

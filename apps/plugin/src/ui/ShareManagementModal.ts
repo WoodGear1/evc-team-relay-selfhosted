@@ -1181,7 +1181,7 @@ export class ShareManagementModal extends Modal {
 				let syncedFiles = 0;
 				const failedFiles: string[] = [];
 				for (const item of items) {
-					if (item.type === "doc") {
+					if (item.type === "doc" || item.type === "canvas") {
 						try {
 							const filePath = `${this.selectedShare.path}/${item.path}`;
 							console.debug("[WebSync] Reading content from:", filePath);
@@ -1297,7 +1297,7 @@ export class ShareManagementModal extends Modal {
 
 			let synced = 0;
 			for (const item of items) {
-				if (item.type !== "doc") continue;
+				if (item.type !== "doc" && item.type !== "canvas") continue;
 				const content = await this.getDocumentContent(`${this.selectedShare.path}/${item.path}`);
 				if (!content) continue;
 				if (this.plugin.shareClientManager) {

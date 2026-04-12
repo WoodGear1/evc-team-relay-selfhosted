@@ -2,6 +2,7 @@
 	import MarkdownViewer from '$lib/components/MarkdownViewer.svelte';
 	import EditableMarkdownViewer from '$lib/components/EditableMarkdownViewer.svelte';
 	import LiveMarkdownViewer from '$lib/components/LiveMarkdownViewer.svelte';
+	import CanvasViewer from '$lib/components/canvas/CanvasViewer.svelte';
 	import CommentsSection from '$lib/components/CommentsSection.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import TableOfContents from '$lib/components/TableOfContents.svelte';
@@ -50,6 +51,7 @@
 	// Check if real-time sync is available for this share
 	const hasRealtimeSync = $derived(isRealtimeSyncAvailable(data.share.web_doc_id));
 	const showComments = $derived(Boolean(data.share.allow_comments && data.share.published_link_id));
+	const isCanvas = $derived(data.share.path.toLowerCase().endsWith('.canvas'));
 
 	const fileTree = $derived(data.isFolder ? buildFileTree(data.folderItems) : []);
 
@@ -292,8 +294,33 @@
 			<div style="height: 1px; background: linear-gradient(to right, hsl(var(--primary) / 0.3), hsl(var(--border) / 0.5), transparent); margin-bottom: 2rem;"></div>
 
 			<div class="flex gap-8 items-start">
-				<div class="flex-1 min-w-0 max-w-[800px]">
-					{#if hasRealtimeSync}
+				<div class="flex-1 min-w-0 {isCanvas ? 'max-w-none' : 'max-w-[800px]'}">
+					{#if isCanvas}
+					{#await (async () => {
+						try {
+							const parsed = JSON.parse(data.content || '{}');
+							if (!parsed.nodes && !parsed.edges) {
+								return { error: true, content: data.content || '' };
+							}
+							return parsed;
+						} catch (e) {
+							console.error('Failed to parse canvas data:', e);
+							return { error: true, content: data.content || '' };
+						}
+					})()}
+						<div class="flex items-center justify-center h-[500px] bg-muted/20 rounded-xl border">
+							<span class="text-muted-foreground">Loading canvas...</span>
+						</div>
+					{:then canvasData}
+						{#if canvasData.error}
+							<MarkdownViewer content={canvasData.content} slug={data.share.web_slug} folderItems={data.folderItems} />
+						{:else}
+							<div class="h-[80vh] min-h-[600px] w-full">
+								<CanvasViewer {canvasData} slug={data.share.web_slug} />
+							</div>
+						{/if}
+					{/await}
+					{:else if hasRealtimeSync}
 						<LiveMarkdownViewer
 							content={data.content || ''}
 							docId={data.share.web_doc_id}

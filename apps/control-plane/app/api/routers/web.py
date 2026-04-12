@@ -147,7 +147,7 @@ def _extract_folder_file_content(
         return share.web_content, folder_items
 
     for item in folder_items_data:
-        if item.get("path") == target_path and item.get("type") == "doc":
+        if item.get("path") == target_path and item.get("type") in ("doc", "canvas"):
             return item.get("content", ""), folder_items
 
     return None, folder_items
@@ -161,8 +161,25 @@ def _get_web_session_max_age(settings) -> int:
     return max(1, settings.refresh_token_expire_days) * 24 * 60 * 60
 
 
+def _check_user_access_from_token(db: Session, request: Request, share: models.Share) -> bool:
+    """Check if the user has access to the share based on JWT token."""
+    token = _request_bearer_token(request)
+    if not token:
+        return False
+    try:
+        user_id = _decode_web_user_id(token)
+        return _user_can_access_share(db, share, user_id)
+    except Exception:
+        return False
+
+
 def _ensure_share_content_access(db: Session, request: Request, share: models.Share) -> None:
     if share.visibility == models.ShareVisibility.PROTECTED:
+        # First check if they have a valid user token and are a member/owner
+        if _check_user_access_from_token(db, request, share):
+            return
+
+        # Otherwise require a valid web session (from password)
         session_token = request.cookies.get("web_session")
         if not session_token:
             raise HTTPException(
@@ -293,6 +310,8 @@ def _link_access_state(
         return True, False
 
     if link.access_mode == models.LinkAccessMode.PROTECTED:
+        if _check_user_access_from_token(db, request, share):
+            return True, True
         session_token = request.cookies.get("web_session")
         if not session_token:
             return False, False
@@ -454,12 +473,15 @@ def get_share_by_slug(
     if share.visibility == models.ShareVisibility.PUBLIC:
         include_content = True
     elif share.visibility == models.ShareVisibility.PROTECTED:
-        session_token = request.cookies.get("web_session")
-        if session_token:
-            try:
-                include_content = WebSessionService.validate_web_session(session_token, share.id)
-            except HTTPException:
-                include_content = False
+        if _check_user_access_from_token(db, request, share):
+            include_content = True
+        else:
+            session_token = request.cookies.get("web_session")
+            if session_token:
+                try:
+                    include_content = WebSessionService.validate_web_session(session_token, share.id)
+                except HTTPException:
+                    include_content = False
     elif share.visibility == models.ShareVisibility.PRIVATE:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
@@ -926,8 +948,8 @@ def sync_folder_file_content(
     try:
         from app.core import security as sec_module
 
-        payload = sec_module.decode_access_token(token)
-        user_id_str = payload.get("sub")
+        token_payload = sec_module.decode_access_token(token)
+        user_id_str = token_payload.get("sub")
         if not user_id_str:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1627,8 +1649,6 @@ def serve_web_asset(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Share not found or not published",
         )
-
-    _ensure_share_content_access(db, request, share)
 
     # Read from MinIO
     client = _get_minio_client()

@@ -431,7 +431,7 @@ export class WebSyncManager {
 		}
 
 		const items = this.getFolderItems(folderPath);
-		stats.totalFiles = items.filter((i) => i.type === "doc").length;
+		stats.totalFiles = items.filter((i) => i.type === "doc" || i.type === "canvas").length;
 
 		// Push structure first
 		try {
@@ -444,9 +444,9 @@ export class WebSyncManager {
 			});
 		}
 
-		// Push content for each md file
+		// Push content for each md and canvas file
 		for (const item of items) {
-			if (item.type !== "doc") continue;
+			if (item.type !== "doc" && item.type !== "canvas") continue;
 
 			const filePath = `${folderPath}/${item.path}`;
 			const file = this.vault.getAbstractFileByPath(filePath);
