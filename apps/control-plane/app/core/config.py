@@ -28,11 +28,11 @@ class Settings(BaseSettings):
 
     jwt_secret: str = Field(default="dev-secret-change-me")
     jwt_algorithm: str = Field(default="HS256")
-    access_token_expire_minutes: int = Field(default=60)
-    refresh_token_expire_days: int = Field(default=30)
+    access_token_expire_minutes: int = Field(default=43200)
+    refresh_token_expire_days: int = Field(default=3650)
 
     relay_public_url: AnyUrl = Field(default="wss://relay.localhost")
-    relay_token_ttl_minutes: int = Field(default=30)
+    relay_token_ttl_minutes: int = Field(default=43200)
 
     # Relay Ed25519 authentication
     relay_private_key: str | None = Field(

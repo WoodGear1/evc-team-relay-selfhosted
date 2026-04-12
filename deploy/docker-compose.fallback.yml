@@ -2,12 +2,15 @@ services:
   control-plane:
     volumes:
       - /mnt/tank/docker-containers/obsidian-relay/patches/admin_ui.py:/app/app/api/routers/admin_ui.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/core/config.py:/app/app/core/config.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/token_service.py:/app/app/services/token_service.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/security.py:/app/app/core/security.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/tokens.py:/app/app/api/routers/tokens.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/main.py:/app/app/main.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/models.py:/app/app/db/models.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/web.py:/app/app/api/routers/web.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/routers/server.py:/app/app/api/routers/server.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/routers/internal_git_sync.py:/app/app/api/routers/internal_git_sync.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/routers/published_links.py:/app/app/api/routers/published_links.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/routers/comments.py:/app/app/api/routers/comments.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/routers/document_versions.py:/app/app/api/routers/document_versions.py:ro
@@ -22,9 +25,11 @@ services:
       - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604020002_backfill_published_links.py:/app/app/db/migrations/versions/202604020002_backfill_published_links.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604040001_add_document_versions.py:/app/app/db/migrations/versions/202604040001_add_document_versions.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604040002_expand_auditaction_for_web_publish.py:/app/app/db/migrations/versions/202604040002_expand_auditaction_for_web_publish.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604050001_add_git_sync_notify_trigger.py:/app/app/db/migrations/versions/202604050001_add_git_sync_notify_trigger.py:ro
 
   control-plane-migrate:
     volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/patches/core/config.py:/app/app/core/config.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/models.py:/app/app/db/models.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/schemas/published_link.py:/app/app/schemas/published_link.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/schemas/document_version.py:/app/app/schemas/document_version.py:ro
@@ -32,6 +37,7 @@ services:
       - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604020002_backfill_published_links.py:/app/app/db/migrations/versions/202604020002_backfill_published_links.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604040001_add_document_versions.py:/app/app/db/migrations/versions/202604040001_add_document_versions.py:ro
       - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604040002_expand_auditaction_for_web_publish.py:/app/app/db/migrations/versions/202604040002_expand_auditaction_for_web_publish.py:ro
+      - /mnt/tank/docker-containers/obsidian-relay/patches/migrations/202604050001_add_git_sync_notify_trigger.py:/app/app/db/migrations/versions/202604050001_add_git_sync_notify_trigger.py:ro
 
   web-publish:
     image: !reset null
@@ -40,3 +46,20 @@ services:
       dockerfile: ./apps/web-publish/Dockerfile
     ports:
       - "3300:3000"
+
+  git-sync:
+    build:
+      context: ../apps/git-sync
+      dockerfile: Dockerfile
+    ports:
+      - "3400:8000"
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/git-sync:/repo
+      - /mnt/tank/docker-containers/obsidian-relay/keys:/keys:ro
+
+  yjs-bridge:
+    build:
+      context: ../apps/yjs-bridge
+      dockerfile: Dockerfile
+    ports:
+      - "3500:3500"

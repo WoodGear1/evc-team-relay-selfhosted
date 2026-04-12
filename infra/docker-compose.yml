@@ -103,6 +103,9 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: relay
+      GIT_SYNC_INTERNAL_TOKEN: ${GIT_SYNC_INTERNAL_TOKEN:-}
+      GIT_SYNC_REPO_URL: ${GIT_SYNC_REMOTE_URL:-}
+      GIT_SYNC_BRANCH: ${GIT_SYNC_BRANCH:-main}
     volumes:
       - ./data/uploads:/app/app/static/uploads
     restart: unless-stopped
@@ -258,6 +261,52 @@ services:
       retries: 3
       start_period: 10s
 
+  git-sync:
+    build:
+      context: ../apps/git-sync
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    environment:
+      GIT_SYNC_GIT_REMOTE_URL: ${GIT_SYNC_REMOTE_URL:-}
+      GIT_SYNC_GIT_BRANCH: ${GIT_SYNC_BRANCH:-main}
+      GIT_SYNC_GIT_SSH_KEY_PATH: /keys/id_ed25519
+      GIT_SYNC_REPO_PATH: /repo
+      GIT_SYNC_CONTROL_PLANE_INTERNAL_URL: http://control-plane:8000
+      GIT_SYNC_YJS_BRIDGE_URL: http://yjs-bridge:3500
+      GIT_SYNC_GIT_SYNC_INTERNAL_TOKEN: ${GIT_SYNC_INTERNAL_TOKEN}
+      GIT_SYNC_PG_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      GIT_SYNC_PUBLIC_MINIO_URL: https://cp.${DOMAIN_BASE}/static/uploads
+    volumes:
+      - git-sync-repo:/repo
+      - ./data/git-sync-keys:/keys:ro
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      yjs-bridge:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request;sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health').status == 200 else sys.exit(1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  yjs-bridge:
+    build:
+      context: ../apps/yjs-bridge
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3500/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   caddy:
     image: caddy:2
     ports:
@@ -283,3 +332,4 @@ volumes:
   pgdata:
   prometheus-data:
   grafana-data:
+  git-sync-repo:

@@ -194,15 +194,23 @@
 	async function renderContent() {
 		try {
 			renderedHtml = await renderMarkdown(content, { slug, folderItems });
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Failed to render markdown:', error);
-			renderedHtml = '<p class="error">Failed to render document</p>';
+			renderedHtml = `<p class="error">Failed to render document: ${escapeHtml(error.message || String(error))}</p>`;
 		} finally {
 			isRendering = false;
 		}
 		await tick();
 		await initMermaid();
 		attachDelegatedHandlers();
+	}
+
+	function escapeHtml(str: string): string {
+		return str
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;');
 	}
 
 	onMount(() => {
@@ -301,11 +309,12 @@
 	   Base markdown content
 	   ================================ */
 	.markdown-content {
-		line-height: 1.6;
-		color: var(--foreground);
+		line-height: 1.75;
+		color: hsl(var(--foreground));
 		animation: fadeIn 0.3s ease-out;
 		user-select: text;
 		-webkit-user-select: text;
+		font-size: 1rem;
 	}
 
 	@keyframes fadeIn {
@@ -321,59 +330,71 @@
 	   Standard HTML elements
 	   ================================ */
 	.markdown-content :global(h1) {
-		font-size: 2rem;
-		margin-top: 1.5rem;
+		font-size: 2.25rem;
+		margin-top: 2rem;
 		margin-bottom: 1rem;
-		font-weight: 600;
-		color: var(--foreground);
+		font-weight: 800;
+		line-height: 1.1;
+		letter-spacing: -0.02em;
+		color: hsl(var(--foreground));
 	}
 
 	.markdown-content :global(h2) {
 		font-size: 1.5rem;
-		margin-top: 1.5rem;
-		margin-bottom: 0.75rem;
+		margin-top: 2rem;
+		margin-bottom: 1rem;
 		font-weight: 600;
-		color: var(--foreground);
+		line-height: 1.3;
+		letter-spacing: -0.01em;
+		color: hsl(var(--foreground));
+		border-bottom: 1px solid hsl(var(--border) / 0.5);
+		padding-bottom: 0.3em;
 	}
 
 	.markdown-content :global(h3) {
 		font-size: 1.25rem;
-		margin-top: 1.25rem;
-		margin-bottom: 0.5rem;
+		margin-top: 1.5rem;
+		margin-bottom: 0.75rem;
 		font-weight: 600;
-		color: var(--foreground);
+		line-height: 1.3;
+		letter-spacing: -0.01em;
+		color: hsl(var(--foreground));
 	}
 
 	.markdown-content :global(h4),
 	.markdown-content :global(h5),
 	.markdown-content :global(h6) {
 		font-size: 1rem;
-		margin-top: 1rem;
+		margin-top: 1.25rem;
 		margin-bottom: 0.5rem;
 		font-weight: 600;
-		color: var(--foreground);
+		color: hsl(var(--foreground));
 	}
 
 	.markdown-content :global(p) {
-		margin-bottom: 1rem;
+		margin-top: 1.25rem;
+		margin-bottom: 1.25rem;
+		line-height: 1.75;
 	}
 
 	.markdown-content :global(a) {
 		color: hsl(var(--primary));
 		text-decoration: none;
+		font-weight: 500;
 	}
 
 	.markdown-content :global(a:hover) {
 		color: hsl(var(--primary-hover));
 		text-decoration: underline;
+		text-underline-offset: 4px;
 	}
 
 	.markdown-content :global(code) {
 		background-color: hsl(var(--muted));
 		padding: 0.2em 0.4em;
-		border-radius: 3px;
+		border-radius: 8px;
 		font-family: var(--font-mono);
-		font-size: 0.9em;
+		font-size: 0.875em;
 		color: hsl(var(--foreground));
 	}
 
@@ -391,18 +412,18 @@
 		background-color: transparent;
 		padding: 0;
 		color: inherit;
-		font-size: 0.85rem;
-		line-height: 1.35;
+		font-size: 0.875rem;
+		line-height: 1.7;
 	}
 
 	.markdown-content :global(blockquote) {
 		position: relative;
-		border-left: 3px solid hsl(var(--primary) / 0.5);
+		border-left: 4px solid hsl(var(--primary) / 0.5);
 		border-radius: 0 8px 8px 0;
-		padding: 0.5rem 0.85rem 0.5rem 0.85rem;
-		margin: 0.75rem 0;
-		color: hsl(var(--foreground) / 0.85);
-		font-style: normal;
+		padding: 0.5rem 1.2rem;
+		margin: 1.5rem 0;
+		color: hsl(var(--muted-foreground));
+		font-style: italic;
 		background: hsl(var(--muted) / 0.35);
 	}
 
@@ -416,12 +437,43 @@
 
 	.markdown-content :global(ul),
 	.markdown-content :global(ol) {
-		margin-bottom: 1rem;
-		padding-left: 2rem;
+		margin-bottom: 1.25rem;
+		padding-left: 1.5rem;
+		color: hsl(var(--foreground));
+	}
+
+	.markdown-content :global(ul) {
+		list-style-type: disc;
+	}
+
+	.markdown-content :global(ol) {
+		list-style-type: decimal;
+	}
+
+	.markdown-content :global(ul ul),
+	.markdown-content :global(ol ul),
+	.markdown-content :global(ul ol),
+	.markdown-content :global(ol ol) {
+		margin-top: 0.5rem;
+		margin-bottom: 0;
+	}
+
+	.markdown-content :global(ul ul) {
+		list-style-type: circle;
+	}
+
+	.markdown-content :global(ul ul ul) {
+		list-style-type: square;
 	}
 
 	.markdown-content :global(li) {
 		margin-bottom: 0.5rem;
+		line-height: 1.7;
+	}
+
+	.markdown-content :global(li > p) {
+		margin-top: 0.25rem;
+		margin-bottom: 0.25rem;
 	}
 
 	.markdown-content :global(table) {
@@ -520,11 +572,12 @@
 		background-color: hsl(var(--warning) / 0.35);
 		color: inherit;
 		padding: 0.1em 0.2em;
-		border-radius: 2px;
+		border-radius: 6px;
 	}
 
 	:global(.dark) .markdown-content :global(mark) {
 		background-color: hsl(var(--warning) / 0.2);
+		border-radius: 6px;
 	}
 
 	/* ================================
@@ -804,14 +857,17 @@
 		font-size: 0.9rem;
 		line-height: 1.6;
 		color: hsl(var(--foreground));
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
 	}
 
-	.markdown-content :global(.callout-content > p:first-child) {
+	.markdown-content :global(.callout-content > p) {
+		margin: 0;
+	}
+
+	.markdown-content :global(.callout-content > :first-child) {
 		margin-top: 0;
-	}
-
-	.markdown-content :global(.callout-content > p:last-child) {
-		margin-bottom: 0;
 	}
 
 	.markdown-content :global(.callout-content > :last-child) {
@@ -1419,27 +1475,49 @@
 		overflow-x: auto;
 	}
 
-	.markdown-content :global(.code-block-container pre code) {
+	.markdown-content :global(.code-block-container code) {
+		display: flex;
+		align-items: flex-start;
+		justify-content: flex-start;
+		flex-direction: column;
 		font-size: 0.85rem;
-		line-height: 1.5;
+		line-height: 1.2;
+		padding: 0;
+		gap: 0;
+	}
+
+	.markdown-content :global(.code-block-container pre code) {
+		/* Overridden by the selector above for flex-direction */
+		font-size: 0.85rem;
+		line-height: 1.2;
 		padding: 0;
 	}
 
 	.markdown-content :global(.code-line) {
-		display: block;
-		padding: 0 1rem;
+		display: grid;
+		grid-template-columns: 3.5em minmax(0, 1fr);
+		align-items: flex-start;
+		min-width: 100%;
+		padding: 0;
 	}
 
 	.markdown-content :global(.line-num) {
-		display: inline-block;
-		width: 2.5em;
-		margin-right: 1rem;
+		display: flex;
+		justify-content: flex-end;
+		margin-right: 0.75rem;
 		text-align: right;
 		color: hsl(var(--muted-foreground) / 0.4);
 		user-select: none;
+		-webkit-user-select: none;
 		font-size: 0.85em;
 		border-right: 1px solid hsl(var(--border) / 0.3);
-		padding-right: 0.75em;
+		padding-right: 0.75rem;
+		padding-left: 0.5rem;
+		background: transparent;
+	}
+
+	.markdown-content :global(.line-num::before) {
+		content: attr(data-line);
 	}
 
 	.markdown-content :global(.code-line:hover .line-num) {

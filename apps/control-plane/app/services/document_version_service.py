@@ -166,8 +166,8 @@ def build_diff_preview(
     
     # If no diff, and it's the first commit, show everything as added
     if not base_version and version_content:
-        diff = [f"+{line}" for line in version_content.split("\n")]
-        diff = ["--- previous", "+++ current", f"@@ -0,0 +1,{len(diff)} @@"] + diff
+        diff_lines = [f"+{line}" for line in version_content.split("\n")]
+        diff = ["--- previous", "+++ current", f"@@ -0,0 +1,{len(diff_lines)} @@"] + diff_lines
 
     # If it's a single line that changed to another single line without newlines,
     # difflib correctly handles it as long as we split("\n").

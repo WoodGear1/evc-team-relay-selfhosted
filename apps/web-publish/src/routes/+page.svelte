@@ -55,7 +55,7 @@
 						{currentUser.name || currentUser.email}
 					</span>
 					{#if adminUrl}
-						<a href={adminUrl} target="_blank" rel="noopener" class="btn btn-secondary">Admin Panel</a>
+						<a href={adminUrl} target="_blank" rel="noopener" data-sveltekit-reload class="btn btn-secondary">Admin Panel</a>
 					{/if}
 					<button type="button" class="btn btn-ghost" disabled={logoutPending} onclick={() => void handleLogout()}>
 						{logoutPending ? 'Signing out...' : 'Sign out'}

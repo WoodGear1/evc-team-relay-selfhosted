@@ -290,21 +290,13 @@
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-spinner"><circle cx="12" cy="12" r="10" opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path></svg>
 						</span>
 					{:else if query}
-						<button type="button" class="search-clear" onclick={clearSearch} aria-label="Clear search">
+						<button type="button" class="search-clear" onclick={clearSearch} aria-label="Clear search" tabindex="-1">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
 						</button>
 					{/if}
 				</label>
 
 				{#if open}
-					<button
-						type="button"
-						class="search-underlay"
-						style={`top:${overlayTop}px;`}
-						aria-label="Close search"
-						onclick={closeSearch}
-					></button>
-
 					<div class="search-panel" aria-label="Search results">
 						<div class="search-panel__header">
 							<div class="search-panel__meta">
@@ -406,8 +398,8 @@
 						<div class="profile-menu-name">{userLabel}</div>
 						<div class="profile-menu-email">{currentUser.email}</div>
 					</div>
-					{#if currentUser.is_admin}
-						<a class="profile-menu-link" href="/admin-ui">Open admin panel</a>
+					{#if currentUser.is_admin && $page.data.adminUrl}
+						<a class="profile-menu-link" href={$page.data.adminUrl} target="_blank" rel="noopener" data-sveltekit-reload>Open admin panel</a>
 					{/if}
 					<button type="button" class="profile-menu-link danger" disabled={logoutPending} onclick={() => void handleLogout()}>
 						{logoutPending ? 'Signing out...' : 'Sign out'}
@@ -419,6 +411,16 @@
 		{/if}
 	</div>
 </div>
+
+{#if enableSearch && open}
+	<button
+		type="button"
+		class="search-underlay"
+		style={`top:${overlayTop}px;`}
+		aria-label="Close search"
+		onclick={closeSearch}
+	></button>
+{/if}
 
 <style>
 	.viewer-topbar {
@@ -432,6 +434,7 @@
 		padding: 0.55rem 0;
 		background: hsl(var(--background) / 0.9);
 		backdrop-filter: blur(10px);
+		-webkit-backdrop-filter: blur(10px);
 		border-bottom: 1px solid hsl(var(--border) / 0.22);
 	}
 
@@ -499,6 +502,14 @@
 		font-size: 0.92rem;
 	}
 
+	.search-input-wrap input::-webkit-search-decoration,
+	.search-input-wrap input::-webkit-search-cancel-button,
+	.search-input-wrap input::-webkit-search-results-button,
+	.search-input-wrap input::-webkit-search-results-decoration {
+		display: none;
+		-webkit-appearance: none;
+	}
+
 	.search-input-wrap input::placeholder {
 		color: hsl(var(--muted-foreground));
 	}
@@ -522,7 +533,7 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		z-index: 1;
+		z-index: 30;
 		border: 0;
 		background:
 			linear-gradient(180deg, hsl(var(--background) / 0.08), hsl(var(--background) / 0.28));
@@ -538,7 +549,9 @@
 		z-index: 2;
 		border-radius: 1.1rem;
 		border: 1px solid hsl(var(--border) / 0.45);
-		background: hsl(var(--card) / 0.96);
+		background: hsl(var(--card) / 0.85);
+		backdrop-filter: blur(16px);
+		-webkit-backdrop-filter: blur(16px);
 		box-shadow:
 			0 26px 80px hsl(220 35% 5% / 0.22),
 			0 1px 0 hsl(var(--border) / 0.35);
@@ -555,6 +568,13 @@
 		background: linear-gradient(180deg, hsl(var(--muted) / 0.45), transparent);
 	}
 
+	.search-panel__meta {
+		display: flex;
+		flex-direction: column;
+		gap: 0.18rem;
+		min-width: 0;
+	}
+
 	.search-panel__title {
 		font-size: 0.8rem;
 		font-weight: 700;
@@ -564,13 +584,12 @@
 	}
 
 	.search-panel__caption {
-		margin-top: 0.18rem;
 		font-size: 0.79rem;
 		color: hsl(var(--muted-foreground));
 	}
 
 	.search-panel__hint {
-		display: inline-flex;
+		display: flex;
 		align-items: center;
 		gap: 0.35rem;
 		font-size: 0.72rem;

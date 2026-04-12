@@ -27,7 +27,10 @@ from app.api.routers import (
     auth,
     comments,
     dashboard,
+    document_versions,
+    files,
     health,
+    internal_git_sync,
     invites,
     keys,
     metrics,
@@ -141,6 +144,7 @@ Get a token by calling `POST /auth/login` with valid credentials.
 
     # Add rate limiter state
     app.state.limiter = limiter
+    app.state.git_sync_status = {}
 
     # Add middlewares (order matters - first added = outermost)
     app.add_middleware(PrometheusMiddleware)  # Metrics collection
@@ -190,8 +194,12 @@ Get a token by calling `POST /auth/login` with valid credentials.
     app.include_router(tokens.router, prefix="/v1")
     app.include_router(keys.router, prefix="/v1")
     app.include_router(web.router)  # Web publishing public API (prefix included)
+    app.include_router(files.files_router, prefix="/v1")  # /v1/files/cas/... and /v1/files/blob/...
     app.include_router(published_links.router, prefix="/v1")  # Published links CRUD
     app.include_router(comments.router, prefix="/v1")  # Comments API
+    app.include_router(document_versions.router, prefix="/v1")  # Document versions API
+    if settings.git_sync_internal_token:
+        app.include_router(internal_git_sync.router)
     app.include_router(webhooks.router)  # Webhooks API (prefix included)
     app.include_router(webhooks.admin_router)  # Admin webhooks API (prefix included)
 
@@ -260,30 +268,13 @@ Get a token by calling `POST /auth/login` with valid credentials.
                 detail="Invalid access token",
             )
 
-        private_key = request.app.state.relay_private_key
-        key_id = request.app.state.relay_key_id
-        relay_url = str(cfg.relay_public_url).rstrip("/")
-
-        http_relay_url = relay_url.replace("wss://", "https://").replace("ws://", "http://")
-
-        _s3rn_match = _re.search(r":file:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", payload.docId, _re.IGNORECASE)
-        file_doc_id = _s3rn_match.group(1) if _s3rn_match else payload.docId
-
-        file_token = security.create_file_token_cwt(
-            private_key=private_key,
-            key_id=key_id,
-            file_hash=payload.hash,
-            doc_id=file_doc_id,
-            mode="write",
-            expires_minutes=cfg.relay_token_ttl_minutes,
-            audience=relay_url,
-        )
-
-        base_url = f"{http_relay_url}/f/{file_doc_id}"
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost")
+        base_url = f"{proto}://{host}/v1/files/cas/{payload.hash}"
 
         return FileTokenResponse(
             baseUrl=base_url,
-            token=file_token,
+            token=token_str,
             docId=payload.docId,
         )
 

@@ -74,7 +74,7 @@
 						</div>
 					{/if}
 					
-					<table class="w-full border-collapse font-mono text-[0.8rem] leading-[1.4] text-left whitespace-pre">
+					<table class="w-full border-collapse font-mono text-[0.8rem] leading-[1.5] text-left whitespace-pre-wrap break-all">
 						<colgroup>
 							{#if mode === 'split'}
 								<col class="w-[3rem]" />
@@ -113,28 +113,28 @@
 										<tr class="hover:bg-muted/20 group">
 											<!-- LEFT SIDE (Base) -->
 											{#if row.left}
-												<td class="px-2 py-0.5 select-none text-right text-muted-foreground/60 border-r border-border/20 bg-background group-hover:bg-muted/30">
+												<td class="px-2 py-1 select-none text-right text-muted-foreground/60 border-r border-border/20 bg-background group-hover:bg-muted/30 align-top">
 													{row.left.ln}
 												</td>
-												<td class="px-4 py-0.5 overflow-hidden text-ellipsis {row.left.type === 'del' ? 'bg-red-500/10 text-red-700 dark:text-red-400' : ''}">
+												<td class="px-4 py-1 align-top {row.left.type === 'del' ? 'bg-red-500/10 text-red-700 dark:text-red-400' : ''}">
 													{row.left.content}
 												</td>
 											{:else}
-												<td class="px-2 py-0.5 border-r border-border/20 bg-muted/10"></td>
-												<td class="px-4 py-0.5 bg-muted/5"></td>
+												<td class="px-2 py-1 border-r border-border/20 bg-muted/10 align-top"></td>
+												<td class="px-4 py-1 bg-muted/5 align-top"></td>
 											{/if}
 											
 											<!-- RIGHT SIDE (Head) -->
 											{#if row.right}
-												<td class="px-2 py-0.5 select-none text-right text-muted-foreground/60 border-l border-r border-border/20 bg-background group-hover:bg-muted/30">
+												<td class="px-2 py-1 select-none text-right text-muted-foreground/60 border-l border-r border-border/20 bg-background group-hover:bg-muted/30 align-top">
 													{row.right.ln}
 												</td>
-												<td class="px-4 py-0.5 overflow-hidden text-ellipsis {row.right.type === 'add' ? 'bg-green-500/10 text-green-700 dark:text-green-400' : ''}">
+												<td class="px-4 py-1 align-top {row.right.type === 'add' ? 'bg-green-500/10 text-green-700 dark:text-green-400' : ''}">
 													{row.right.content}
 												</td>
 											{:else}
-												<td class="px-2 py-0.5 border-l border-r border-border/20 bg-muted/10"></td>
-												<td class="px-4 py-0.5 bg-muted/5"></td>
+												<td class="px-2 py-1 border-l border-r border-border/20 bg-muted/10 align-top"></td>
+												<td class="px-4 py-1 bg-muted/5 align-top"></td>
 											{/if}
 										</tr>
 									{/each}
@@ -147,20 +147,20 @@
 											{change.type === 'del' ? 'bg-red-500/10 text-red-700 dark:text-red-400' : ''}
 										">
 											<!-- Base Line Number -->
-											<td class="px-2 py-0.5 select-none text-right text-muted-foreground/60 border-r border-border/20 bg-background/50">
+											<td class="px-2 py-1 select-none text-right text-muted-foreground/60 border-r border-border/20 bg-background/50 align-top">
 												{change.type === 'normal' ? change.ln1 : change.type === 'del' ? change.ln : ''}
 											</td>
 											<!-- Head Line Number -->
-											<td class="px-2 py-0.5 select-none text-right text-muted-foreground/60 border-r border-border/40 bg-background/50">
+											<td class="px-2 py-1 select-none text-right text-muted-foreground/60 border-r border-border/40 bg-background/50 align-top">
 												{change.type === 'normal' ? change.ln2 : change.type === 'add' ? change.ln : ''}
 											</td>
 											<!-- Content -->
-											<td class="px-4 py-0.5 w-full">
-												<div class="flex">
-													<span class="w-4 select-none opacity-50 flex-shrink-0">
+											<td class="px-4 py-1 w-full align-top">
+												<div class="flex items-start">
+													<span class="w-4 select-none opacity-50 flex-shrink-0 pt-px">
 														{change.type === 'add' ? '+' : change.type === 'del' ? '-' : ' '}
 													</span>
-													<span>{change.content.replace(/^[+-]/, '')}</span>
+													<span class="min-w-0 break-all pt-px">{change.content.replace(/^[+-]/, '')}</span>
 												</div>
 											</td>
 										</tr>

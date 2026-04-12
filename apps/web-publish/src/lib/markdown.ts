@@ -590,11 +590,78 @@ marked.use({
 	extensions: [highlightExtension, wikilinkExtension, tagExtension, embedExtension]
 });
 
-// Add walkTokens for callout and task list detection
+// Add walkTokens for callout, task list detection, and async shiki highlighting
 marked.use({
-	walkTokens(token: Token) {
+	async walkTokens(token: Token) {
 		walkTokensForCallouts(token);
 		walkTokensForTaskLists(token);
+
+		if (token.type === 'code') {
+			const codeToken = token as Tokens.Code;
+			if (codeToken.lang === 'mermaid') {
+				(codeToken as any)._highlighted = `<div class="mermaid">${codeToken.text}</div>\n`;
+			} else {
+				try {
+					const requestedLang = (codeToken.lang || 'text').trim().toLowerCase();
+					const highlighter = await getHighlighterInstance();
+					
+					const loadedLangs = highlighter.getLoadedLanguages();
+					const language = loadedLangs.includes(requestedLang as any) ? requestedLang : 'text';
+					
+					const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
+					const codeContent = codeToken.text;
+					const lineCount = codeContent.replace(/\n$/, '').split('\n').length;
+					const lineCountDisplay = `${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+					
+					const highlightedHtml = highlighter.codeToHtml(codeContent, {
+						lang: language,
+						themes: {
+							light: 'github-light',
+							dark: 'vitesse-dark'
+						},
+						defaultColor: false,
+						transformers: [
+							{
+								line(node, line) {
+									node.properties.class = (node.properties.class || '') + ' code-line';
+									const originalChildren = [...node.children];
+									node.children = [
+										{
+											type: 'element',
+											tagName: 'span',
+											properties: { class: 'line-num', 'data-line': String(line) },
+											children: []
+										},
+										{
+											type: 'element',
+											tagName: 'span',
+											properties: { class: 'code-line-content' },
+											children: originalChildren
+										}
+									];
+								}
+							}
+						]
+					});
+
+					(codeToken as any)._highlighted = `<div class="code-block-container relative group my-6 rounded-xl bg-muted/15 border border-border/50 overflow-hidden shadow-sm">
+						<div class="code-block-header flex items-center justify-between px-4 py-2 bg-muted/40 backdrop-blur-md border-b border-border/30">
+							<span class="code-lang text-xs font-mono text-muted-foreground uppercase tracking-wider">${langDisplay}</span>
+							<span class="code-line-count font-mono">${lineCountDisplay}</span>
+							<button class="code-copy-btn opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0 text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border rounded-md p-1.5 shadow-sm" aria-label="Copy code" title="Copy code">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+							</button>
+						</div>
+						<div class="shiki-wrapper overflow-x-auto text-[0.85rem] leading-[1.6]">
+							${highlightedHtml}
+						</div>
+					</div>\n`;
+				} catch (e) {
+					console.warn('Shiki highlighting failed:', e);
+					// Fallback is handled by the code renderer
+				}
+			}
+		}
 	}
 });
 
@@ -644,53 +711,11 @@ marked.use({
 			return `<div class="callout ${colorClass} ${typeClass}"><div class="callout-header">${titleHtml}</div>${contentWrapper}</div>\n`;
 		},
 
-		code(token: Tokens.Code): string | false | any {
-			// Await this properly in an async context, or mark as any for now because Marked async is tricky with types
-			const p = (async () => {
-				if (token.lang === 'mermaid') {
-					return `<div class="mermaid">${token.text}</div>\n`;
-				}
-
-				const requestedLang = (token.lang || 'text').trim().toLowerCase();
-				const highlighter = await getHighlighterInstance();
-				
-				// Check if language is supported by Shiki, otherwise fallback to text
-				const loadedLangs = highlighter.getLoadedLanguages();
-				const language = loadedLangs.includes(requestedLang as any) ? requestedLang : 'text';
-				
-				const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
-				const codeContent = token.text;
-				
-				// Highlight with both themes
-				const highlightedHtml = highlighter.codeToHtml(codeContent, {
-					lang: language,
-					themes: {
-						light: 'github-light',
-						dark: 'vitesse-dark'
-					},
-					defaultColor: false // Important for dual themes to work via CSS variables
-				});
-
-				// We need to parse the generated HTML to add our custom line numbers and UI
-				// Shiki outputs: <pre class="shiki shiki-themes..." style="..."><code...>...</code></pre>
-				// We'll wrap it in our UI
-				
-				const lineCount = codeContent.split('\n').length;
-
-				// Add a copy button and language header around the shiki output
-				return `<div class="code-block-container relative group my-6 rounded-xl bg-muted/15 border border-border/50 overflow-hidden shadow-sm">
-					<div class="code-block-header flex items-center justify-between px-4 py-2 bg-muted/40 backdrop-blur-md border-b border-border/30">
-						<span class="code-lang text-xs font-mono text-muted-foreground uppercase tracking-wider">${langDisplay}</span>
-						<button class="code-copy-btn opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0 text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border rounded-md p-1.5 shadow-sm" aria-label="Copy code" title="Copy code">
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-						</button>
-					</div>
-					<div class="shiki-wrapper overflow-x-auto text-[0.85rem] leading-[1.6]">
-						${highlightedHtml}
-					</div>
-				</div>\n`;
-			})();
-			return p as any;
+		code(token: Tokens.Code): string {
+			if ((token as any)._highlighted) {
+				return (token as any)._highlighted;
+			}
+			return `<pre><code>${escapeHtml(token.text)}</code></pre>`;
 		},
 
 		listitem(this: unknown, token: Tokens.ListItem) {
@@ -874,7 +899,8 @@ export async function renderMarkdown(markdown: string, context?: RenderContext):
 	const withCustomBlocks = processCustomBlocks(withMath);
 
 	// Step 5: Sanitize
-	const sanitizedHtml = DOMPurify.sanitize(withCustomBlocks, SANITIZE_CONFIG);
+	const purify = DOMPurify.sanitize ? DOMPurify : (DOMPurify as any).default || DOMPurify;
+	const sanitizedHtml = purify.sanitize(withCustomBlocks, SANITIZE_CONFIG);
 
 	// Clear context after rendering
 	_renderContext = {};

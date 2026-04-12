@@ -30,6 +30,21 @@ services:
     ports:
       - "3300:3000"
 
+  git-sync:
+    build: !reset null
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/git-sync:${EVC_RELEASE_TAG:-latest}
+    ports:
+      - "3400:8000"
+    volumes:
+      - /mnt/tank/docker-containers/obsidian-relay/git-sync:/repo
+      - /mnt/tank/docker-containers/obsidian-relay/keys:/keys:ro
+
+  yjs-bridge:
+    build: !reset null
+    image: ghcr.io/woodgear1/evc-team-relay-selfhosted/yjs-bridge:${EVC_RELEASE_TAG:-latest}
+    ports:
+      - "3500:3500"
+
   relay-server:
     image: ghcr.io/woodgear1/evc-team-relay-selfhosted/relay-server:${EVC_RELEASE_TAG:-latest}
     build: !reset null

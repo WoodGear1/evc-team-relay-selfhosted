@@ -86,7 +86,7 @@
 	});
 </script>
 
-<div class="max-w-[1200px] w-full mx-auto px-4 py-8 flex flex-col gap-6 text-foreground font-sans">
+<div class="w-full mx-auto px-4 md:px-8 2xl:px-12 py-8 flex flex-col gap-6 text-foreground font-sans max-w-[2000px]">
 	{#if restored}
 		<div class="flex items-center gap-3 px-4 py-3 rounded-lg border border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400 text-sm font-medium" role="status">
 			<Check size={18} />

@@ -22,11 +22,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// Note: This is a restrictive policy. Adjust based on actual needs.
 	const csp = [
 		"default-src 'self'",
-		"script-src 'self' 'unsafe-inline'", // unsafe-inline needed for SvelteKit hydration
-		"style-src 'self' 'unsafe-inline'", // unsafe-inline needed for component styles
+		"script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'", // unsafe-eval needed for Shiki WASM
+		"style-src 'self' 'unsafe-inline' https:", // https: needed for Katex/external fonts
 		"img-src 'self' data: https:",
-		"font-src 'self' data:",
-		"connect-src 'self'",
+		"font-src 'self' data: https:",
+		"connect-src 'self' https: wss:",
 		"frame-ancestors 'none'",
 		"base-uri 'self'",
 		"form-action 'self'"
