@@ -297,7 +297,7 @@ const wikilinkExtension = {
 			const slug = target
 				.slice(1)
 				.toLowerCase()
-				.replace(/[^\w\s-]/g, '')
+				.replace(/[^\w\u0400-\u04FF\s-]/g, '')
 				.replace(/\s+/g, '-');
 			const text = display.startsWith('#') ? display.slice(1) : display;
 			return `<a class="wikilink-chip wikilink-resolved" href="#${escapeHtml(slug)}">${_linkSvg}<span>${escapeHtml(text)}</span></a>`;
@@ -665,9 +665,25 @@ marked.use({
 	}
 });
 
-// Custom renderer for callouts, mermaid, code blocks, and task lists
+// Custom renderer for callouts, mermaid, code blocks, task lists and headings
 marked.use({
 	renderer: {
+		heading(this: unknown, token: Tokens.Heading) {
+			const parse = (tokens: Token[]) =>
+				this && typeof (this as { parser?: { parseInline: (tokens: Token[]) => string } }).parser?.parseInline === 'function'
+					? (this as { parser: { parseInline: (tokens: Token[]) => string } }).parser.parseInline(tokens)
+					: token.text;
+					
+			const text = parse(token.tokens);
+			
+			const id = token.text
+				.toLowerCase()
+				.replace(/[^\w\u0400-\u04FF\s-]/g, '')
+				.replace(/\s+/g, '-');
+				
+			return `<h${token.depth} id="${escapeHtml(id)}">${text}</h${token.depth}>\n`;
+		},
+
 		blockquote(this: unknown, token: Tokens.Blockquote) {
 			const callout = (token as unknown as Record<string, unknown>)._callout as
 				| { type: string; title: string; foldable: boolean; defaultOpen: boolean }

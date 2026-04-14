@@ -1585,6 +1585,53 @@ export default class Live extends Plugin {
 		}
 	}
 
+	public async autoLinkShares(serverId: string) {
+		if (!this.shareClientManager) return;
+		const client = this.shareClientManager.getClient(serverId);
+		if (!client) return;
+
+		try {
+			new Notice(`Fetching shares from server to auto-link...`);
+			const shares = await client.listShares();
+			
+			let linkedCount = 0;
+			for (const share of shares) {
+				if (share.kind === "folder") {
+					// Check if already mapped
+					const existing = this.sharedFolders.find(sf => sf.guid === share.id);
+					if (existing) continue;
+
+					// Not mapped. Ensure folder exists in vault.
+					const folderPath = share.path;
+					const abstractFile = this.app.vault.getAbstractFileByPath(folderPath);
+					if (!abstractFile) {
+						// Create folder structure recursively
+						const parts = folderPath.split('/');
+						let current = '';
+						for (const part of parts) {
+							current = current ? `${current}/${part}` : part;
+							const exists = this.app.vault.getAbstractFileByPath(current);
+							if (!exists) {
+								await this.app.vault.createFolder(current);
+							}
+						}
+					}
+					// Link it
+					this.sharedFolders.new(folderPath, share.id, "relay-onprem", true);
+					linkedCount++;
+					console.log(`[AutoLink] Auto-linked folder: ${folderPath}`);
+				}
+			}
+			if (linkedCount > 0) {
+				this.sharedFolders.notifyListeners();
+				new Notice(`Auto-linked ${linkedCount} folders from server!`);
+			}
+		} catch (error) {
+			console.error("[AutoLink] Failed to fetch and link shares:", error);
+			new Notice(`Failed to auto-link shares from server`);
+		}
+	}
+
 	private async syncAllShares() {
 		const startedAt = performance.now();
 		if (!this.shareClientManager) {

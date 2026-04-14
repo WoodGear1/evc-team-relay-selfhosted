@@ -23,7 +23,12 @@ export const load: PageServerLoad = async ({ params, cookies, setHeaders }) => {
 			throw error(404, 'Not a folder share');
 		}
 
-		applyPrivateCacheHeaders(setHeaders, access);
+		setHeaders({
+			'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+			'Pragma': 'no-cache',
+			'Expires': '0',
+			'Surrogate-Control': 'no-store'
+		});
 		requireDocumentAccess(access, true);
 
 		const needsPassword = requiresPasswordPrompt(access);

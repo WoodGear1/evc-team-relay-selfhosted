@@ -186,12 +186,35 @@
 
 		// Use server info or fallback to user input
 		const serverName = newServerName.trim() || serverInfo?.name || new URL(newControlPlaneUrl).hostname;
-		const relayUrl = newRelayServerUrl.trim() || serverInfo?.relay_url || undefined;
-		const gitRepoUrl =
+		let relayUrl = newRelayServerUrl.trim() || serverInfo?.relay_url || undefined;
+		
+		if (!relayUrl && newControlPlaneUrl.trim()) {
+			try {
+				const cpUrl = new URL(newControlPlaneUrl.trim());
+				const wsProtocol = cpUrl.protocol === "http:" ? "ws:" : "wss:";
+				relayUrl = `${wsProtocol}//${cpUrl.host}`;
+			} catch (e) {
+				// ignore
+			}
+		}
+
+		let rawGitUrl =
 			newGitRepoUrl.trim() ||
 			serverInfo?.git_repo_url ||
 			serverInfo?.features?.git_repo_url ||
 			undefined;
+			
+		let gitRepoUrl = undefined;
+		if (rawGitUrl) {
+			try {
+				const url = new URL(rawGitUrl);
+				if (url.protocol.match(/^https?:$/)) {
+					gitRepoUrl = rawGitUrl;
+				}
+			} catch (e) {
+				// ignore invalid URLs so they don't break server addition
+			}
+		}
 
 		// Generate or use existing ID (prefer server's own ID if available)
 		const serverId = editingServer?.id || serverInfo?.id || generateServerId(newControlPlaneUrl);
@@ -308,6 +331,7 @@
 					await authProvider.loginWithOAuth2(serverInfo.features.oauth_provider);
 					new Notice(`Logged in to ${server.name}`);
 					refreshAuthStatus();
+					plugin.autoLinkShares(server.id).catch(e => console.error("Auto link failed", e));
 					return;
 				} catch (error: unknown) {
 					// OAuth failed, fall back to password login
@@ -327,6 +351,7 @@
 			() => {
 				new Notice(`Logged in to ${server.name}`);
 				refreshAuthStatus();
+				plugin.autoLinkShares(server.id).catch(e => console.error("Auto link failed", e));
 			},
 			server.id
 		);

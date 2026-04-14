@@ -182,7 +182,7 @@
 							<MarkdownViewer content={canvasData.content} slug={data.share.web_slug} folderItems={data.folderItems} />
 						{:else}
 							<div class="h-[80vh] min-h-[600px] w-full">
-								<CanvasViewer {canvasData} slug={data.share.web_slug} />
+								<CanvasViewer {canvasData} slug={data.share.web_slug} folderItems={data.folderItems} />
 							</div>
 						{/if}
 					{/await}

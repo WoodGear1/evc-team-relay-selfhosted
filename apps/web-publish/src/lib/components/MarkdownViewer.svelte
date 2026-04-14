@@ -329,6 +329,14 @@
 	/* ================================
 	   Standard HTML elements
 	   ================================ */
+	.markdown-content > :global(:first-child) {
+		margin-top: 0 !important;
+	}
+
+	.markdown-content > :global(:last-child) {
+		margin-bottom: 0 !important;
+	}
+
 	.markdown-content :global(h1) {
 		font-size: 2.25rem;
 		margin-top: 2rem;
