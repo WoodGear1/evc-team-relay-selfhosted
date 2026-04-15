@@ -137,6 +137,7 @@ interface RelaySettings extends FeatureFlags, DebugSettings {
 	relayOnPrem: RelayOnPremSettings;
 	gitProvider?: "github" | "gitlab" | "none";
 	gitToken?: string;
+	avatarUrl?: string;
 }
 
 const DEFAULT_SETTINGS: RelaySettings = {
@@ -145,6 +146,7 @@ const DEFAULT_SETTINGS: RelaySettings = {
 	relayOnPrem: DEFAULT_RELAY_ONPREM_SETTINGS,
 	gitProvider: "none",
 	gitToken: "",
+	avatarUrl: "",
 	...FeatureFlagDefaults,
 	...DEFAULT_DEBUG_SETTINGS,
 };
@@ -1394,7 +1396,7 @@ export default class Live extends Plugin {
 					}
 
 					// Register auto-sync shares (v1.8.1) - supports both doc and folder shares
-					if (share.web_published && share.web_sync_mode === "auto") {
+					if (share.web_published) {
 						if (this.webSyncManager) {
 							this.webSyncManager.registerAutoSyncShare(
 								share.path,
@@ -1466,7 +1468,7 @@ export default class Live extends Plugin {
 					}
 
 					// Register auto-sync shares (v1.8.1) - supports both doc and folder shares
-					if (share.web_published && share.web_sync_mode === "auto") {
+					if (share.web_published) {
 						if (this.webSyncManager) {
 							this.webSyncManager.registerAutoSyncShare(
 								share.path,
@@ -3153,6 +3155,7 @@ export default class Live extends Plugin {
 					return old.call(this, tfile, fn, options);
 				};
 			},
+			/* TEMPORARILY DISABLED AS REQUESTED
 			createFolder(old: unknown) {
 				return function (this: Vault, folderPath: string) {
 					const nextPath = plugin.resolveNewFolderPathInSelectedContext(folderPath);
@@ -3161,6 +3164,7 @@ export default class Live extends Plugin {
 					).call(this, nextPath);
 				};
 			},
+			*/
 		});
 
 		getPatcher().patch(this.fileManager, {
@@ -3182,6 +3186,7 @@ export default class Live extends Plugin {
 					).call(plugin.fileManager, filename, sourcePath);
 				};
 			},
+			/* TEMPORARILY DISABLED AS REQUESTED
 			getNewFileParent(old: unknown) {
 				return function (sourcePath: string, newFilePath?: string) {
 					const folder = plugin.resolveSelectedContextFolder();
@@ -3193,10 +3198,12 @@ export default class Live extends Plugin {
 					).call(plugin.fileManager, sourcePath, newFilePath);
 				};
 			},
+			*/
 		});
 
 		const appAny = this.app as unknown as ObsidianApp;
 		if (appAny.commands?.executeCommandById) {
+			/* TEMPORARILY DISABLED AS REQUESTED
 			getPatcher().patch(appAny.commands, {
 				executeCommandById(old: unknown) {
 					return async function (
@@ -3217,6 +3224,7 @@ export default class Live extends Plugin {
 					};
 				},
 			});
+			*/
 		}
 
 		this.patchWebviewer();

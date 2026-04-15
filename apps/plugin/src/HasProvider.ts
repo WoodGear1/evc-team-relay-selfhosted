@@ -43,11 +43,15 @@ function makeProvider(
 	);
 
 	if (user) {
+		const plugin = (window as any).app?.plugins?.getPlugin("evc-team-relay");
+		const avatarUrl = plugin?.settings?.get()?.avatarUrl;
+		
 		provider.awareness.setLocalStateField("user", {
 			name: user.name,
 			id: user.id,
 			color: user.color.color,
 			colorLight: user.color.light,
+			picture: avatarUrl || user.picture,
 		});
 		provider.awareness.setLocalStateField("presence", {
 			mode: "viewing" satisfies PresenceMode,

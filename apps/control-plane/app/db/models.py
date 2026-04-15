@@ -201,7 +201,7 @@ class Share(Base, TimestampMixin):
     web_published: Mapped[bool] = mapped_column(default=False, nullable=False)
     web_slug: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     web_noindex: Mapped[bool] = mapped_column(default=True, nullable=False)
-    web_sync_mode: Mapped[str] = mapped_column(String(10), default="manual", nullable=False)
+    web_sync_mode: Mapped[str] = mapped_column(String(10), default="auto", nullable=False)
     web_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     web_content_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

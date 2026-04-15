@@ -529,6 +529,33 @@
 	{/if}
 </div>
 
+<div class="evc-server-section">
+	<div class="evc-section-heading">
+		<div class="evc-section-heading-title">User Profile</div>
+		<div class="evc-section-heading-desc">
+			Configure your custom avatar URL to display to other users and in the web publisher.
+		</div>
+	</div>
+	<div class="relay-server-form">
+		<div class="relay-server-form-field">
+			<label for="avatar-url">Avatar URL</label>
+			<input
+				id="avatar-url"
+				type="text"
+				placeholder="https://example.com/avatar.png"
+				value={plugin.settings.get().avatarUrl || ""}
+				on:change={async (e) => {
+					await plugin.settings.update(settings => ({
+						...settings,
+						avatarUrl: e.currentTarget.value
+					}));
+					new Notice("Avatar URL saved. Please restart the app or reconnect shares to apply.");
+				}}
+			/>
+		</div>
+	</div>
+</div>
+
 <GitSyncSettings {plugin} />
 
 <style>

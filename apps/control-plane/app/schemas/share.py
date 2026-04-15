@@ -19,7 +19,7 @@ class ShareCreate(ShareBase):
     web_published: bool = False
     web_slug: str | None = Field(default=None, min_length=1, max_length=255)
     web_noindex: bool = True
-    web_sync_mode: str = "manual"
+    web_sync_mode: str = "auto"
     git_sync_mode: str = "manual"
 
     @field_validator("password")
